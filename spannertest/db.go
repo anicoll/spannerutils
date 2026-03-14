@@ -26,11 +26,12 @@ import (
 )
 
 type database struct {
-	mu      sync.Mutex
-	lastTS  time.Time // last commit timestamp
-	tables  map[spansql.ID]*table
-	indexes map[spansql.ID]struct{} // only record their existence
-	views   map[spansql.ID]struct{} // only record their existence
+	mu            sync.Mutex
+	lastTS        time.Time // last commit timestamp
+	tables        map[spansql.ID]*table
+	indexes       map[spansql.ID]struct{} // only record their existence
+	views         map[spansql.ID]struct{} // only record their existence
+	changeStreams map[spansql.ID]struct{} // only record their existence
 
 	rwMu sync.Mutex // held by read-write transactions
 }
@@ -250,6 +251,9 @@ func (d *database) ApplyDDL(stmt spansql.DDLStmt) *status.Status {
 	if d.views == nil {
 		d.views = make(map[spansql.ID]struct{})
 	}
+	if d.changeStreams == nil {
+		d.changeStreams = make(map[spansql.ID]struct{})
+	}
 
 	switch stmt := stmt.(type) {
 	default:
@@ -320,6 +324,12 @@ func (d *database) ApplyDDL(stmt spansql.DDLStmt) *status.Status {
 		}
 		d.views[stmt.Name] = struct{}{}
 		return nil
+	case *spansql.CreateChangeStream:
+		if _, ok := d.changeStreams[stmt.Name]; ok {
+			return status.Newf(codes.AlreadyExists, "change stream %s already exists", stmt.Name)
+		}
+		d.changeStreams[stmt.Name] = struct{}{}
+		return nil
 	case *spansql.DropTable:
 		if _, ok := d.tables[stmt.Name]; !ok {
 			return status.Newf(codes.NotFound, "no table named %s", stmt.Name)
@@ -338,6 +348,18 @@ func (d *database) ApplyDDL(stmt spansql.DDLStmt) *status.Status {
 			return status.Newf(codes.NotFound, "no view named %s", stmt.Name)
 		}
 		delete(d.views, stmt.Name)
+		return nil
+	case *spansql.DropChangeStream:
+		if _, ok := d.changeStreams[stmt.Name]; !ok {
+			return status.Newf(codes.NotFound, "no change stream named %s", stmt.Name)
+		}
+		delete(d.changeStreams, stmt.Name)
+		return nil
+	case *spansql.AlterChangeStream:
+		if _, ok := d.changeStreams[stmt.Name]; !ok {
+			return status.Newf(codes.NotFound, "no change stream named %s", stmt.Name)
+		}
+		// Change streams exist, alterations are tracked but not enforced in the fake
 		return nil
 	case *spansql.AlterTable:
 		t, ok := d.tables[stmt.Name]
