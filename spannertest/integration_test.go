@@ -865,6 +865,27 @@ func TestIntegration_ReadsAndQueries(t *testing.T) {
 			nil,
 			[][]interface{}{{int64(17), "sweet", false, nil, []byte("hello"), false, true, "17", "true", nil, civil.Date{Year: 2008, Month: 12, Day: 25}, int64(2008), int64(1), int64(5)}},
 		},
+		// Test CONCAT function
+		{
+			`SELECT CONCAT('Hello', ' ', 'World')`,
+			nil,
+			[][]interface{}{{"Hello World"}},
+		},
+		{
+			`SELECT CONCAT('A', 'B', 'C', 'D')`,
+			nil,
+			[][]interface{}{{"ABCD"}},
+		},
+		{
+			`SELECT CONCAT('test')`,
+			nil,
+			[][]interface{}{{"test"}},
+		},
+		{
+			`SELECT CONCAT('Hello', NULL, 'World')`,
+			nil,
+			[][]interface{}{{nil}},
+		},
 		// Check handling of NULL values for the IS operator.
 		// There was a bug that returned errors for some of these cases.
 		{

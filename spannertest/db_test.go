@@ -760,6 +760,87 @@ func TestCreateAndManageChangeStream(t *testing.T) {
 	}
 }
 
+func TestConcatFunction(t *testing.T) {
+	tests := []struct {
+		desc   string
+		values []interface{}
+		types  []spansql.Type
+		want   interface{}
+		wantT  spansql.Type
+		err    bool
+	}{
+		{
+			desc:   "Concatenate two strings",
+			values: []interface{}{"Hello", " World"},
+			types:  []spansql.Type{{Base: spansql.String}, {Base: spansql.String}},
+			want:   "Hello World",
+			wantT:  spansql.Type{Base: spansql.String},
+		},
+		{
+			desc:   "Concatenate four strings",
+			values: []interface{}{"A", "B", "C", "D"},
+			types:  []spansql.Type{{Base: spansql.String}, {Base: spansql.String}, {Base: spansql.String}, {Base: spansql.String}},
+			want:   "ABCD",
+			wantT:  spansql.Type{Base: spansql.String},
+		},
+		{
+			desc:   "Single string",
+			values: []interface{}{"test"},
+			types:  []spansql.Type{{Base: spansql.String}},
+			want:   "test",
+			wantT:  spansql.Type{Base: spansql.String},
+		},
+		{
+			desc:   "NULL in arguments returns NULL",
+			values: []interface{}{"Hello", nil, "World"},
+			types:  []spansql.Type{{Base: spansql.String}, {Base: spansql.String}, {Base: spansql.String}},
+			want:   nil,
+			wantT:  spansql.Type{Base: spansql.String},
+		},
+		{
+			desc:   "Empty strings",
+			values: []interface{}{"", "test", ""},
+			types:  []spansql.Type{{Base: spansql.String}, {Base: spansql.String}, {Base: spansql.String}},
+			want:   "test",
+			wantT:  spansql.Type{Base: spansql.String},
+		},
+		{
+			desc:   "No arguments - error",
+			values: []interface{}{},
+			types:  []spansql.Type{},
+			err:    true,
+		},
+		{
+			desc:   "Bytes concatenation",
+			values: []interface{}{[]byte("Hello"), []byte(" "), []byte("World")},
+			types:  []spansql.Type{{Base: spansql.Bytes}, {Base: spansql.Bytes}, {Base: spansql.Bytes}},
+			want:   "Hello World",
+			wantT:  spansql.Type{Base: spansql.String},
+		},
+	}
+
+	fn := functions["CONCAT"]
+	for _, test := range tests {
+		got, gotT, err := fn.Eval(test.values, test.types)
+		if test.err {
+			if err == nil {
+				t.Errorf("%s: expected error, got nil", test.desc)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%s: unexpected error: %v", test.desc, err)
+			continue
+		}
+		if !reflect.DeepEqual(got, test.want) {
+			t.Errorf("%s: got %v, want %v", test.desc, got, test.want)
+		}
+		if gotT != test.wantT {
+			t.Errorf("%s: got type %v, want type %v", test.desc, gotT, test.wantT)
+		}
+	}
+}
+
 func TestChangeStreamDDLOperations(t *testing.T) {
 	var db database
 

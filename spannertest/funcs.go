@@ -18,7 +18,7 @@ import (
 
 type function struct {
 	// Eval evaluates the result of the function using the given input.
-	Eval func(values []interface{}, types []spansql.Type) (interface{}, spansql.Type, error)
+	Eval func(values []any, types []spansql.Type) (any, spansql.Type, error)
 }
 
 func firstErr(errors []error) error {
@@ -61,6 +61,35 @@ var functions = map[string]function{
 				return nil, spansql.Type{}, status.Error(codes.InvalidArgument, "No matching signature for function LOWER for the given argument types")
 			}
 			return strings.ToLower(values[0].(string)), spansql.Type{Base: spansql.String}, nil
+		},
+	},
+	"CONCAT": {
+		Eval: func(values []any, types []spansql.Type) (any, spansql.Type, error) {
+			// CONCAT requires at least one argument
+			if len(values) == 0 {
+				return nil, spansql.Type{}, status.Error(codes.InvalidArgument, "No matching signature for function CONCAT for the given argument types")
+			}
+			// If any argument is NULL, CONCAT returns NULL
+			for _, v := range values {
+				if v == nil {
+					return nil, spansql.Type{Base: spansql.String}, nil
+				}
+			}
+			// All arguments must be strings or bytes
+			var result strings.Builder
+			for i, v := range values {
+				str, ok := v.(string)
+				if !ok {
+					// Check if it's bytes
+					if bytes, ok := v.([]byte); ok {
+						str = string(bytes)
+					} else {
+						return nil, spansql.Type{}, status.Errorf(codes.InvalidArgument, "No matching signature for function CONCAT for argument %d with type %T", i+1, v)
+					}
+				}
+				result.WriteString(str)
+			}
+			return result.String(), spansql.Type{Base: spansql.String}, nil
 		},
 	},
 	"CAST": {
