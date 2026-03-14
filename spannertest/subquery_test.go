@@ -263,6 +263,91 @@ func TestCorrelatedSubqueryWithJoinHint(t *testing.T) {
 	}
 }
 
+// TestCoalesce covers COALESCE, including the case that originally triggered
+// "can't deduce column type from expression [...] (type spansql.Coalesce)":
+// a COALESCE wrapping a correlated scalar subquery and a typed fallback.
+func TestCoalesce(t *testing.T) {
+	client, adminClient, _, cleanup := makeClient(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := updateDDL(t, adminClient,
+		`CREATE TABLE Schedules (
+			ID        INT64 NOT NULL,
+			ChannelID INT64 NOT NULL,
+		) PRIMARY KEY (ID)`,
+		`CREATE TABLE Tasks (
+			ScheduleID      INT64 NOT NULL,
+			ID              INT64 NOT NULL,
+			LastUpdatedTime TIMESTAMP,
+			Status          STRING(MAX) NOT NULL,
+		) PRIMARY KEY (ScheduleID, ID)`,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	ts1 := time.Date(2024, 6, 1, 10, 0, 0, 0, time.UTC)
+	ts2 := time.Date(2024, 7, 1, 12, 0, 0, 0, time.UTC)
+	zero := time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	_, err := client.Apply(ctx, []*spanner.Mutation{
+		spanner.Insert("Schedules", []string{"ID", "ChannelID"}, []interface{}{1, 100}),
+		// Schedule 2 has no tasks — COALESCE should fall back to the zero timestamp.
+		spanner.Insert("Schedules", []string{"ID", "ChannelID"}, []interface{}{2, 100}),
+
+		spanner.Insert("Tasks", []string{"ScheduleID", "ID", "LastUpdatedTime", "Status"}, []interface{}{1, 1, ts1, "DONE"}),
+		spanner.Insert("Tasks", []string{"ScheduleID", "ID", "LastUpdatedTime", "Status"}, []interface{}{1, 2, ts2, "DONE"}),
+	})
+	if err != nil {
+		t.Fatalf("inserting data: %v", err)
+	}
+
+	// The original failing query shape: COALESCE(scalar subquery with GROUP BY, typed fallback).
+	stmt := spanner.Statement{
+		SQL: `SELECT s.ID,
+			COALESCE(
+				(SELECT MAX(t.LastUpdatedTime)
+				 FROM Tasks t
+				 WHERE t.ScheduleID = s.ID
+				 GROUP BY t.ScheduleID),
+				TIMESTAMP("0001-01-01T00:00:00Z")
+			) AS LastUpdated
+		FROM Schedules AS s
+		WHERE s.ChannelID = @channel_id
+		ORDER BY s.ID`,
+		Params: map[string]interface{}{"channel_id": int64(100)},
+	}
+
+	ri := client.Single().Query(ctx, stmt)
+	got, err := slurpRows(t, ri)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+
+	want := [][]interface{}{
+		{int64(1), ts2},  // schedule 1: MAX of ts1,ts2
+		{int64(2), zero}, // schedule 2: no tasks, falls back to zero timestamp
+	}
+
+	if len(got) != len(want) {
+		t.Fatalf("got %d rows, want %d\n got:  %v\nwant: %v", len(got), len(want), got, want)
+	}
+	for i := range got {
+		if len(got[i]) != len(want[i]) {
+			t.Errorf("row %d: got %d cols, want %d", i, len(got[i]), len(want[i]))
+			continue
+		}
+		for j := range got[i] {
+			if got[i][j] != want[i][j] {
+				t.Errorf("row %d col %d: got %v (%T), want %v (%T)",
+					i, j, got[i][j], got[i][j], want[i][j], want[i][j])
+			}
+		}
+	}
+}
+
 // TestGreatestLeast covers the GREATEST and LEAST scalar functions.
 func TestGreatestLeast(t *testing.T) {
 	client, adminClient, _, cleanup := makeClient(t)

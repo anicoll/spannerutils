@@ -569,6 +569,17 @@ func (ec evalContext) evalExpr(e spansql.Expr) (interface{}, error) {
 		return ec.evalArraySubquery(e)
 	case spansql.ExistsOp:
 		return ec.evalExistsOp(e)
+	case spansql.Coalesce:
+		for _, expr := range e.ExprList {
+			v, err := ec.evalExpr(expr)
+			if err != nil {
+				return nil, err
+			}
+			if v != nil {
+				return v, nil
+			}
+		}
+		return nil, nil
 	}
 }
 
@@ -1117,6 +1128,19 @@ func (ec evalContext) colInfo(e spansql.Expr) (colInfo, error) {
 			return colInfo{}, err
 		}
 		return colInfo{Type: t}, nil
+	case spansql.Coalesce:
+		// Return the type of the first argument that is not a NULL literal.
+		// If all are NULL literals, fall back to the first arg's inferred type.
+		for _, expr := range e.ExprList {
+			if _, isNull := expr.(spansql.NullLiteral); isNull {
+				continue
+			}
+			return ec.colInfo(expr)
+		}
+		if len(e.ExprList) > 0 {
+			return ec.colInfo(e.ExprList[0])
+		}
+		return colInfo{Type: int64Type}, nil
 	case spansql.Array:
 		// Assume all element of an array literal have the same type.
 		if len(e) == 0 {
