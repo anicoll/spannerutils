@@ -448,6 +448,122 @@ func TestParseQuery(t *testing.T) {
 				},
 			},
 		},
+		// Trailing comma in SELECT list before FROM — parser must not consume
+		// FROM as a column expression.
+		{
+			`SELECT a.Col1, a.Col2, FROM Items AS a WHERE a.ID = 1`,
+			Query{
+				Select: Select{
+					List: []Expr{PathExp{"a", "Col1"}, PathExp{"a", "Col2"}},
+					From: []SelectFrom{SelectFromTable{Table: "Items", Alias: "a"}},
+					Where: ComparisonOp{
+						Op:  Eq,
+						LHS: PathExp{"a", "ID"},
+						RHS: IntegerLiteral(1),
+					},
+				},
+			},
+		},
+		// Trailing comma after a scalar subquery alias before FROM — the original
+		// bug: parseSelectList looped back and consumed FROM as an identifier.
+		{
+			`SELECT a.X, (SELECT MIN(b.Y) FROM B b WHERE b.AID = a.ID GROUP BY b.AID) AS MinY, FROM A AS a WHERE a.Z = 1`,
+			Query{
+				Select: Select{
+					List: []Expr{
+						PathExp{"a", "X"},
+						ScalarSubquery{Query: Query{
+							Select: Select{
+								List: []Expr{Func{Name: "MIN", Args: []Expr{PathExp{"b", "Y"}}}},
+								From: []SelectFrom{SelectFromTable{Table: "B", Alias: "b"}},
+								Where: ComparisonOp{
+									Op:  Eq,
+									LHS: PathExp{"b", "AID"},
+									RHS: PathExp{"a", "ID"},
+								},
+								GroupBy: []Expr{PathExp{"b", "AID"}},
+							},
+						}},
+					},
+					ListAliases: []ID{"", "MinY"},
+					From:        []SelectFrom{SelectFromTable{Table: "A", Alias: "a"}},
+					Where: ComparisonOp{
+						Op:  Eq,
+						LHS: PathExp{"a", "Z"},
+						RHS: IntegerLiteral(1),
+					},
+				},
+			},
+		},
+		// FORCE_INDEX hint on INNER JOIN target table.
+		{
+			`SELECT * FROM A INNER JOIN B@{FORCE_INDEX=BIdx} ON A.id = B.id`,
+			Query{
+				Select: Select{
+					List: []Expr{Star},
+					From: []SelectFrom{SelectFromJoin{
+						Type: InnerJoin,
+						LHS:  SelectFromTable{Table: "A"},
+						RHS:  SelectFromTable{Table: "B", Hints: map[string]string{"FORCE_INDEX": "BIdx"}},
+						On: ComparisonOp{
+							Op:  Eq,
+							LHS: PathExp{"A", "id"},
+							RHS: PathExp{"B", "id"},
+						},
+					}},
+				},
+			},
+		},
+		// Correlated scalar subquery in SELECT list with GROUP BY and IN UNNEST,
+		// plus outer INNER JOIN with FORCE_INDEX table hint.
+		{
+			`SELECT s.ID, (SELECT MIN(t.PlannedTime) FROM Tasks t WHERE t.ScheduleID = s.ID AND t.Status IN UNNEST(@statuses) GROUP BY t.ScheduleID) AS NextPlannedTime FROM Schedules AS s INNER JOIN PaymentResources@{FORCE_INDEX=PaymentIdx} pr ON pr.ScheduleID = s.ID WHERE s.ChannelID IN UNNEST(@channel_ids)`,
+			Query{
+				Select: Select{
+					List: []Expr{
+						PathExp{"s", "ID"},
+						ScalarSubquery{Query: Query{
+							Select: Select{
+								List: []Expr{
+									Func{Name: "MIN", Args: []Expr{PathExp{"t", "PlannedTime"}}},
+								},
+								From: []SelectFrom{SelectFromTable{Table: "Tasks", Alias: "t"}},
+								Where: LogicalOp{
+									Op: And,
+									LHS: ComparisonOp{
+										Op:  Eq,
+										LHS: PathExp{"t", "ScheduleID"},
+										RHS: PathExp{"s", "ID"},
+									},
+									RHS: InOp{
+										LHS:    PathExp{"t", "Status"},
+										Unnest: true,
+										RHS:    []Expr{Param("statuses")},
+									},
+								},
+								GroupBy: []Expr{PathExp{"t", "ScheduleID"}},
+							},
+						}},
+					},
+					ListAliases: []ID{"", "NextPlannedTime"},
+					From: []SelectFrom{SelectFromJoin{
+						Type: InnerJoin,
+						LHS:  SelectFromTable{Table: "Schedules", Alias: "s"},
+						RHS:  SelectFromTable{Table: "PaymentResources", Hints: map[string]string{"FORCE_INDEX": "PaymentIdx"}, Alias: "pr"},
+						On: ComparisonOp{
+							Op:  Eq,
+							LHS: PathExp{"pr", "ScheduleID"},
+							RHS: PathExp{"s", "ID"},
+						},
+					}},
+					Where: InOp{
+						LHS:    PathExp{"s", "ChannelID"},
+						Unnest: true,
+						RHS:    []Expr{Param("channel_ids")},
+					},
+				},
+			},
+		},
 		// Parenthesized expression in SELECT list - ensures parseLit handles (expr) correctly
 		{
 			`SELECT (1 + 2) * 3, name FROM t`,

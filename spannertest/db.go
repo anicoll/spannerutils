@@ -1167,7 +1167,7 @@ type keyRange struct {
 }
 
 func (r *keyRange) String() string {
-	var sb bytes.Buffer // TODO: Switch to strings.Builder when we drop support for Go 1.9.
+	var sb bytes.Buffer
 	if r.startClosed {
 		sb.WriteString("[")
 	} else {
