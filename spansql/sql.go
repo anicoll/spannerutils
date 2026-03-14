@@ -22,64 +22,66 @@ func buildSQL(x interface{ addSQL(*strings.Builder) }) string {
 }
 
 func (ct CreateTable) SQL() string {
-	str := "CREATE TABLE "
+	var str strings.Builder
+	str.WriteString("CREATE TABLE ")
 	if ct.IfNotExists {
-		str += "IF NOT EXISTS "
+		str.WriteString("IF NOT EXISTS ")
 	}
-	str += ct.Name.SQL() + " (\n"
+	str.WriteString(ct.Name.SQL() + " (\n")
 	for _, c := range ct.Columns {
-		str += "  " + c.SQL() + ",\n"
+		str.WriteString("  " + c.SQL() + ",\n")
 	}
 	for _, tc := range ct.Constraints {
-		str += "  " + tc.SQL() + ",\n"
+		str.WriteString("  " + tc.SQL() + ",\n")
 	}
 	if len(ct.Synonym) > 0 {
-		str += "  SYNONYM(" + ct.Synonym.SQL() + "),\n"
+		str.WriteString("  SYNONYM(" + ct.Synonym.SQL() + "),\n")
 	}
-	str += ") PRIMARY KEY("
+	str.WriteString(") PRIMARY KEY(")
 	for i, c := range ct.PrimaryKey {
 		if i > 0 {
-			str += ", "
+			str.WriteString(", ")
 		}
-		str += c.SQL()
+		str.WriteString(c.SQL())
 	}
-	str += ")"
+	str.WriteString(")")
 	if il := ct.Interleave; il != nil {
-		str += ",\n  INTERLEAVE IN PARENT " + il.Parent.SQL() + " ON DELETE " + il.OnDelete.SQL()
+		str.WriteString(",\n  INTERLEAVE IN PARENT " + il.Parent.SQL() + " ON DELETE " + il.OnDelete.SQL())
 	}
 	if rdp := ct.RowDeletionPolicy; rdp != nil {
-		str += ",\n  " + rdp.SQL()
+		str.WriteString(",\n  " + rdp.SQL())
 	}
-	return str
+	return str.String()
 }
 
 func (ci CreateIndex) SQL() string {
-	str := "CREATE"
+	var str strings.Builder
+	str.WriteString("CREATE")
 	if ci.Unique {
-		str += " UNIQUE"
+		str.WriteString(" UNIQUE")
 	}
 	if ci.NullFiltered {
-		str += " NULL_FILTERED"
+		str.WriteString(" NULL_FILTERED")
 	}
-	str += " INDEX "
+	str.WriteString(" INDEX ")
 	if ci.IfNotExists {
-		str += "IF NOT EXISTS "
+		str.WriteString("IF NOT EXISTS ")
 	}
-	str += ci.Name.SQL() + " ON " + ci.Table.SQL() + "("
+	str.WriteString(ci.Name.SQL() + " ON " + ci.Table.SQL() + "(")
 	for i, c := range ci.Columns {
 		if i > 0 {
-			str += ", "
+			str.WriteString(", ")
 		}
-		str += c.SQL()
+		str.WriteString(c.SQL())
 	}
-	str += ")"
+	str.WriteString(")")
 	if len(ci.Storing) > 0 {
-		str += " STORING (" + idList(ci.Storing, ", ") + ")"
+		str.WriteString(" STORING (" + idList(ci.Storing, ", ") + ")")
 	}
 	if ci.Interleave != "" {
-		str += ", INTERLEAVE IN " + ci.Interleave.SQL()
+		str.WriteString(", INTERLEAVE IN " + ci.Interleave.SQL())
 	}
-	return str
+	return str.String()
 }
 
 func (csi CreateSearchIndex) SQL() string {
@@ -184,40 +186,42 @@ func (cr CreateRole) SQL() string {
 }
 
 func (cs CreateChangeStream) SQL() string {
-	str := "CREATE CHANGE STREAM "
-	str += cs.Name.SQL()
+	var str strings.Builder
+	str.WriteString("CREATE CHANGE STREAM ")
+	str.WriteString(cs.Name.SQL())
 	if cs.WatchAllTables {
-		str += " FOR ALL"
+		str.WriteString(" FOR ALL")
 	} else {
 		for i, table := range cs.Watch {
 			if i == 0 {
-				str += " FOR "
+				str.WriteString(" FOR ")
 			} else {
-				str += ", "
+				str.WriteString(", ")
 			}
-			str += table.SQL()
+			str.WriteString(table.SQL())
 		}
 	}
 	if cs.Options != (ChangeStreamOptions{}) {
-		str += " " + cs.Options.SQL()
+		str.WriteString(" " + cs.Options.SQL())
 	}
 
-	return str
+	return str.String()
 }
 
 func (w WatchDef) SQL() string {
-	str := w.Table.SQL()
+	var str strings.Builder
+	str.WriteString(w.Table.SQL())
 	if !w.WatchAllCols {
-		str += "("
+		str.WriteString("(")
 		for i, c := range w.Columns {
 			if i > 0 {
-				str += ", "
+				str.WriteString(", ")
 			}
-			str += c.SQL()
+			str.WriteString(c.SQL())
 		}
-		str += ")"
+		str.WriteString(")")
 	}
-	return str
+	return str.String()
 }
 
 func (dt DropTable) SQL() string {
@@ -256,55 +260,57 @@ func (dr DropRole) SQL() string {
 }
 
 func (gr GrantRole) SQL() string {
-	sql := "GRANT "
+	var sql strings.Builder
+	sql.WriteString("GRANT ")
 	if gr.Privileges != nil {
 		for i, priv := range gr.Privileges {
 			if i > 0 {
-				sql += ", "
+				sql.WriteString(", ")
 			}
-			sql += priv.Type.SQL()
+			sql.WriteString(priv.Type.SQL())
 			if priv.Columns != nil {
-				sql += "(" + idList(priv.Columns, ", ") + ")"
+				sql.WriteString("(" + idList(priv.Columns, ", ") + ")")
 			}
 		}
-		sql += " ON TABLE " + idList(gr.TableNames, ", ")
+		sql.WriteString(" ON TABLE " + idList(gr.TableNames, ", "))
 	} else if len(gr.TvfNames) > 0 {
-		sql += "EXECUTE ON TABLE FUNCTION " + idList(gr.TvfNames, ", ")
+		sql.WriteString("EXECUTE ON TABLE FUNCTION " + idList(gr.TvfNames, ", "))
 	} else if len(gr.ViewNames) > 0 {
-		sql += "SELECT ON VIEW " + idList(gr.ViewNames, ", ")
+		sql.WriteString("SELECT ON VIEW " + idList(gr.ViewNames, ", "))
 	} else if len(gr.ChangeStreamNames) > 0 {
-		sql += "SELECT ON CHANGE STREAM " + idList(gr.ChangeStreamNames, ", ")
+		sql.WriteString("SELECT ON CHANGE STREAM " + idList(gr.ChangeStreamNames, ", "))
 	} else {
-		sql += "ROLE " + idList(gr.GrantRoleNames, ", ")
+		sql.WriteString("ROLE " + idList(gr.GrantRoleNames, ", "))
 	}
-	sql += " TO ROLE " + idList(gr.ToRoleNames, ", ")
-	return sql
+	sql.WriteString(" TO ROLE " + idList(gr.ToRoleNames, ", "))
+	return sql.String()
 }
 
 func (rr RevokeRole) SQL() string {
-	sql := "REVOKE "
+	var sql strings.Builder
+	sql.WriteString("REVOKE ")
 	if rr.Privileges != nil {
 		for i, priv := range rr.Privileges {
 			if i > 0 {
-				sql += ", "
+				sql.WriteString(", ")
 			}
-			sql += priv.Type.SQL()
+			sql.WriteString(priv.Type.SQL())
 			if priv.Columns != nil {
-				sql += "(" + idList(priv.Columns, ", ") + ")"
+				sql.WriteString("(" + idList(priv.Columns, ", ") + ")")
 			}
 		}
-		sql += " ON TABLE " + idList(rr.TableNames, ", ")
+		sql.WriteString(" ON TABLE " + idList(rr.TableNames, ", "))
 	} else if len(rr.TvfNames) > 0 {
-		sql += "EXECUTE ON TABLE FUNCTION " + idList(rr.TvfNames, ", ")
+		sql.WriteString("EXECUTE ON TABLE FUNCTION " + idList(rr.TvfNames, ", "))
 	} else if len(rr.ViewNames) > 0 {
-		sql += "SELECT ON VIEW " + idList(rr.ViewNames, ", ")
+		sql.WriteString("SELECT ON VIEW " + idList(rr.ViewNames, ", "))
 	} else if len(rr.ChangeStreamNames) > 0 {
-		sql += "SELECT ON CHANGE STREAM " + idList(rr.ChangeStreamNames, ", ")
+		sql.WriteString("SELECT ON CHANGE STREAM " + idList(rr.ChangeStreamNames, ", "))
 	} else {
-		sql += "ROLE " + idList(rr.RevokeRoleNames, ", ")
+		sql.WriteString("ROLE " + idList(rr.RevokeRoleNames, ", "))
 	}
-	sql += " FROM ROLE " + idList(rr.FromRoleNames, ", ")
-	return sql
+	sql.WriteString(" FROM ROLE " + idList(rr.FromRoleNames, ", "))
+	return sql.String()
 }
 
 func (dc DropChangeStream) SQL() string {
@@ -464,14 +470,15 @@ func (co ColumnOptions) SQL() string {
 }
 
 func (rt RenameTable) SQL() string {
-	str := "RENAME TABLE "
+	var str strings.Builder
+	str.WriteString("RENAME TABLE ")
 	for i, op := range rt.TableRenameOps {
 		if i > 0 {
-			str += ", "
+			str.WriteString(", ")
 		}
-		str += op.FromName.SQL() + " TO " + op.ToName.SQL()
+		str.WriteString(op.FromName.SQL() + " TO " + op.ToName.SQL())
 	}
-	return str
+	return str.String()
 }
 
 func (ad AlterDatabase) SQL() string {
@@ -652,52 +659,55 @@ func (ap AlterProtoBundle) SQL() string {
 }
 
 func (u *Update) SQL() string {
-	str := "UPDATE " + u.Table.SQL() + " SET "
+	var str strings.Builder
+	str.WriteString("UPDATE " + u.Table.SQL() + " SET ")
 	for i, item := range u.Items {
 		if i > 0 {
-			str += ", "
+			str.WriteString(", ")
 		}
-		str += item.Column.SQL() + " = "
+		str.WriteString(item.Column.SQL() + " = ")
 		if item.Value != nil {
-			str += item.Value.SQL()
+			str.WriteString(item.Value.SQL())
 		} else {
-			str += "DEFAULT"
+			str.WriteString("DEFAULT")
 		}
 	}
-	str += " WHERE " + u.Where.SQL()
-	return str
+	str.WriteString(" WHERE " + u.Where.SQL())
+	return str.String()
 }
 
 func (i *Insert) SQL() string {
-	str := "INSERT INTO " + i.Table.SQL() + " ("
+	var str strings.Builder
+	str.WriteString("INSERT INTO " + i.Table.SQL() + " (")
 	for i, column := range i.Columns {
 		if i > 0 {
-			str += ", "
+			str.WriteString(", ")
 		}
-		str += column.SQL()
+		str.WriteString(column.SQL())
 	}
-	str += ") "
-	str += i.Input.SQL()
-	return str
+	str.WriteString(") ")
+	str.WriteString(i.Input.SQL())
+	return str.String()
 }
 
 func (v Values) SQL() string {
-	str := "VALUES "
+	var str strings.Builder
+	str.WriteString("VALUES ")
 	for j, values := range v {
 		if j > 0 {
-			str += ", "
+			str.WriteString(", ")
 		}
-		str += "("
+		str.WriteString("(")
 
 		for k, value := range values {
 			if k > 0 {
-				str += ", "
+				str.WriteString(", ")
 			}
-			str += value.SQL()
+			str.WriteString(value.SQL())
 		}
-		str += ")"
+		str.WriteString(")")
 	}
-	return str
+	return str.String()
 }
 
 func (cd ColumnDef) SQL() string {

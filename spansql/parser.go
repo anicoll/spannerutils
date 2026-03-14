@@ -41,7 +41,7 @@ import (
 
 const debug = false
 
-func debugf(format string, args ...interface{}) {
+func debugf(format string, args ...any) {
 	if !debug {
 		return
 	}
@@ -305,7 +305,7 @@ func (p *parser) String() string {
 	return fmt.Sprintf("rem: %q", p.s)
 }
 
-func (p *parser) errorf(format string, args ...interface{}) *parseError {
+func (p *parser) errorf(format string, args ...any) *parseError {
 	pe := &parseError{
 		message:  fmt.Sprintf(format, args...),
 		filename: p.filename,
@@ -400,7 +400,7 @@ digitLoop:
 			i++
 		case base == 10 && (c == 'e' || c == 'E'):
 			if e {
-				p.errorf("bad token %q", p.s[:i])
+				_ = p.errorf("bad token %q", p.s[:i])
 				return
 			}
 			// Switch to consuming float.
@@ -412,7 +412,7 @@ digitLoop:
 			}
 		case base == 10 && c == '.':
 			if dot || e { // any dot must come before E
-				p.errorf("bad token %q", p.s[:i])
+				_ = p.errorf("bad token %q", p.s[:i])
 				return
 			}
 			// Switch to consuming float.
@@ -423,7 +423,7 @@ digitLoop:
 		}
 	}
 	if d0 == i {
-		p.errorf("no digits in numeric literal")
+		_ = p.errorf("no digits in numeric literal")
 		return
 	}
 	sign := ""
@@ -443,7 +443,7 @@ digitLoop:
 		// This is parsed on demand.
 	}
 	if err != nil {
-		p.errorf("bad numeric literal %q: %v", p.cur.value, err)
+		_ = p.errorf("bad numeric literal %q: %v", p.cur.value, err)
 	}
 }
 
@@ -928,7 +928,7 @@ func (p *parser) sniffAhead(skip int, want ...string) bool {
 	orig := *p
 	defer func() { *p = orig }()
 
-	for i := 0; i < skip; i++ {
+	for range skip {
 		p.next()
 	}
 

@@ -21,7 +21,7 @@ func intAddr(i int) *int {
 }
 
 func TestSQL(t *testing.T) {
-	reparseDDL := func(s string) (interface{}, error) {
+	reparseDDL := func(s string) (any, error) {
 		ddl, err := ParseDDLStmt(s)
 		if err != nil {
 			return nil, err
@@ -29,18 +29,18 @@ func TestSQL(t *testing.T) {
 		ddl.clearOffset()
 		return ddl, nil
 	}
-	reparseDML := func(s string) (interface{}, error) {
+	reparseDML := func(s string) (any, error) {
 		dml, err := ParseDMLStmt(s)
 		if err != nil {
 			return nil, err
 		}
 		return dml, nil
 	}
-	reparseQuery := func(s string) (interface{}, error) {
+	reparseQuery := func(s string) (any, error) {
 		q, err := ParseQuery(s)
 		return q, err
 	}
-	reparseExpr := func(s string) (interface{}, error) {
+	reparseExpr := func(s string) (any, error) {
 		e, pe := newParser("f-expr", s).parseExpr()
 		if pe != nil {
 			return nil, pe
@@ -57,7 +57,7 @@ func TestSQL(t *testing.T) {
 	tests := []struct {
 		data    interface{ SQL() string }
 		sql     string
-		reparse func(string) (interface{}, error)
+		reparse func(string) (any, error)
 	}{
 		{
 			&CreateTable{

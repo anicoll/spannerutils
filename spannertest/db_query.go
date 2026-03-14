@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 
 	"cloud.google.com/go/spanner/spansql"
@@ -273,7 +274,7 @@ func (li *limitIter) Next() (row, error) {
 }
 
 type queryParam struct {
-	Value interface{} // internal representation
+	Value any // internal representation
 	Type  spansql.Type
 }
 
@@ -413,7 +414,7 @@ func (d *database) queryContext(q spansql.Query, params queryParams) (*queryCont
 	for name := range qc.tableIndex {
 		names = append(names, name)
 	}
-	sort.Slice(names, func(i, j int) bool { return names[i] < names[j] })
+	slices.Sort(names)
 	for _, name := range names {
 		qc.tables = append(qc.tables, qc.tableIndex[name])
 	}
@@ -466,7 +467,7 @@ func (d *database) evalSelect(sel spansql.Select, qc *queryContext) (si *selIter
 		if err != nil {
 			return nil, err
 		}
-		keys := make([][]interface{}, 0, len(raw.rows))
+		keys := make([][]any, 0, len(raw.rows))
 		for _, row := range raw.rows {
 			// Evaluate sort key for this row.
 			ec.row = row
@@ -573,7 +574,7 @@ func (d *database) evalSelect(sel spansql.Select, qc *queryContext) (si *selIter
 				}
 
 				// Compute aggregate value across this group.
-				var values []interface{}
+				var values []any
 				for i := rg[0]; i < rg[1]; i++ {
 					ec.row = raw.rows[i]
 					if starArg {
@@ -716,7 +717,7 @@ func (d *database) evalSelectFrom(qc *queryContext, ec evalContext, sf spansql.S
 		if err != nil {
 			return ec, nil, fmt.Errorf("evaluating UNNEST arg: %w", err)
 		}
-		arr, ok := e.([]interface{})
+		arr, ok := e.([]any)
 		if !ok {
 			return ec, nil, fmt.Errorf("evaluating UNNEST arg gave %t, want array", e)
 		}
@@ -864,7 +865,7 @@ func (ji *joinIter) prepUsing(using []spansql.ID, lhsEC, rhsEC evalContext, flip
 		primaryUsing, secondaryUsing = secondaryUsing, primaryUsing
 	}
 
-	orNil := func(r row, i int) interface{} {
+	orNil := func(r row, i int) any {
 		if r == nil {
 			return nil
 		}
@@ -1051,7 +1052,7 @@ scanJiUsed:
 	}
 }
 
-func evalSelectOrder(si *selIter, aux []spansql.Expr) (rows []row, keys [][]interface{}, err error) {
+func evalSelectOrder(si *selIter, aux []spansql.Expr) (rows []row, keys [][]any, err error) {
 	// This is like toRawIter except it also evaluates the auxiliary expressions for ORDER BY.
 	for {
 		r, err := si.Next()
@@ -1075,7 +1076,7 @@ func evalSelectOrder(si *selIter, aux []spansql.Expr) (rows []row, keys [][]inte
 // with an external sort key.
 type externalRowSorter struct {
 	rows []row
-	keys [][]interface{}
+	keys [][]any
 	desc []bool // may be nil
 }
 

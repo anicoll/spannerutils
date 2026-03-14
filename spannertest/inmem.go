@@ -163,7 +163,7 @@ func (l *lro) State() *lropb.Operation {
 
 // Logger is something that can be used for logging.
 // It is matched by log.Printf and testing.T.Logf.
-type Logger func(format string, args ...interface{})
+type Logger func(format string, args ...any)
 
 // NewServer creates a new Server.
 // The Server will be listening for gRPC connections, without TLS, on the provided TCP address.
@@ -179,7 +179,7 @@ func NewServer(laddr string) (*Server, error) {
 		l:    l,
 		srv:  grpc.NewServer(grpc.WaitForHandlers(true)),
 		s: &server{
-			logf: func(format string, args ...interface{}) {
+			logf: func(format string, args ...any) {
 				log.Printf("spannertest.inmem: "+format, args...)
 			},
 			start:    time.Now(),
@@ -191,7 +191,9 @@ func NewServer(laddr string) (*Server, error) {
 	spannerpb.RegisterSpannerServer(s.srv, s.s)
 	lropb.RegisterOperationsServer(s.srv, s.s)
 
-	go s.srv.Serve(s.l)
+	go func() {
+		_ = s.srv.Serve(s.l)
+	}()
 
 	return s, nil
 }
@@ -204,7 +206,7 @@ func (s *Server) SetLogger(l Logger) { s.s.logf = l }
 // Close shuts down the server.
 func (s *Server) Close() {
 	s.srv.Stop()
-	s.l.Close()
+	_ = s.l.Close()
 }
 
 func genRandomSession() string {
@@ -878,7 +880,7 @@ func parseQueryParam(v *structpb.Value, typ *spannerpb.Type) (queryParam, error)
 		}
 		return queryParam{Value: val, Type: t}, nil
 	case *structpb.Value_ListValue:
-		var list []interface{}
+		var list []any
 		for _, elem := range v.ListValue.Values {
 			// TODO: Change the type parameter passed through? We only look at the code.
 			p, err := parseQueryParam(elem, typ)
@@ -957,7 +959,7 @@ func spannerTypeFromType(typ spansql.Type) (*spannerpb.Type, error) {
 	return st, nil
 }
 
-func spannerValueFromValue(x interface{}) (*structpb.Value, error) {
+func spannerValueFromValue(x any) (*structpb.Value, error) {
 	switch x := x.(type) {
 	default:
 		return nil, fmt.Errorf("unhandled database value type %T", x)
@@ -985,7 +987,7 @@ func spannerValueFromValue(x interface{}) (*structpb.Value, error) {
 		return &structpb.Value{Kind: &structpb.Value_StringValue{StringValue: x.FloatString(9)}}, nil
 	case nil:
 		return &structpb.Value{Kind: &structpb.Value_NullValue{}}, nil
-	case []interface{}:
+	case []any:
 		var vs []*structpb.Value
 		for _, elem := range x {
 			v, err := spannerValueFromValue(elem)
