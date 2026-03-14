@@ -30,7 +30,6 @@ lint: ## Run linters
 format: ## Format code
 	@echo "Formatting code..."
 	@gofmt -s -w .
-	@goimports -w .
 
 vet: ## Run go vet
 	@echo "Running go vet..."
