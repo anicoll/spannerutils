@@ -3,7 +3,6 @@ package spannertest
 // TODO: More of this test should be moved into integration_test.go.
 
 import (
-	"fmt"
 	"io"
 	"reflect"
 	"strings"
@@ -15,7 +14,6 @@ import (
 
 	structpb "google.golang.org/protobuf/types/known/structpb"
 
-	"cloud.google.com/go/civil"
 	"cloud.google.com/go/spanner/spansql"
 )
 
@@ -111,7 +109,7 @@ func TestTableDescendingKey(t *testing.T) {
 		t.Fatalf("Query: %v", err)
 	}
 	got := slurp(t, ri)
-	want := [][]interface{}{
+	want := [][]any{
 		{"box", int64(3), 1.3},
 		{"box", int64(2), 1.2},
 		{"box", int64(1), 1.1},
@@ -186,7 +184,7 @@ func TestTableSchemaConvertNull(t *testing.T) {
 		t.Fatalf("Query: %v", err)
 	}
 	got := slurp(t, ri)
-	want := [][]interface{}{
+	want := [][]any{
 		{int64(6), "Tiger"},
 		{int64(7), nil},
 	}
@@ -309,7 +307,7 @@ func TestConcurrentReadInsert(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseQuery: %v", err)
 	}
-	var out [][]interface{}
+	var out [][]any
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -431,7 +429,7 @@ func TestGeneratedColumn(t *testing.T) {
 
 }
 
-func slurp(t *testing.T, ri rowIter) (all [][]interface{}) {
+func slurp(t *testing.T, ri rowIter) (all [][]any) {
 	t.Helper()
 	for {
 		row, err := ri.Next()
@@ -456,24 +454,10 @@ func boolV(b bool) *structpb.Value {
 }
 func nullV() *structpb.Value { return &structpb.Value{Kind: &structpb.Value_NullValue{}} }
 
-func boolParam(b bool) queryParam     { return queryParam{Value: b, Type: boolType} }
-func stringParam(s string) queryParam { return queryParam{Value: s, Type: stringType} }
-func intParam(i int64) queryParam     { return queryParam{Value: i, Type: int64Type} }
-func floatParam(f float64) queryParam { return queryParam{Value: f, Type: float64Type} }
-func nullParam() queryParam           { return queryParam{Value: nil} }
-
-func dateParam(s string) queryParam {
-	d, err := civil.ParseDate(s)
-	if err != nil {
-		panic(fmt.Sprintf("bad test date %q: %v", s, err))
-	}
-	return queryParam{Value: d, Type: spansql.Type{Base: spansql.Date}}
-}
-
 func TestRowCmp(t *testing.T) {
-	r := func(x ...interface{}) []interface{} { return x }
+	r := func(x ...any) []any { return x }
 	tests := []struct {
-		a, b []interface{}
+		a, b []any
 		desc []bool
 		want int
 	}{
@@ -497,8 +481,8 @@ func TestRowCmp(t *testing.T) {
 }
 
 func TestKeyRange(t *testing.T) {
-	r := func(x ...interface{}) []interface{} { return x }
-	closedClosed := func(start, end []interface{}) *keyRange {
+	r := func(x ...any) []any { return x }
+	closedClosed := func(start, end []any) *keyRange {
 		return &keyRange{
 			startKey:    start,
 			endKey:      end,
@@ -506,14 +490,14 @@ func TestKeyRange(t *testing.T) {
 			endClosed:   true,
 		}
 	}
-	halfOpen := func(start, end []interface{}) *keyRange {
+	halfOpen := func(start, end []any) *keyRange {
 		return &keyRange{
 			startKey:    start,
 			endKey:      end,
 			startClosed: true,
 		}
 	}
-	openOpen := func(start, end []interface{}) *keyRange {
+	openOpen := func(start, end []any) *keyRange {
 		return &keyRange{
 			startKey: start,
 			endKey:   end,
@@ -522,18 +506,18 @@ func TestKeyRange(t *testing.T) {
 	tests := []struct {
 		kr      *keyRange
 		desc    []bool
-		include [][]interface{}
-		exclude [][]interface{}
+		include [][]any
+		exclude [][]any
 	}{
 		// Examples from google/spanner/v1/keys.proto.
 		{
 			kr: closedClosed(r("Bob", "2015-01-01"), r("Bob", "2015-12-31")),
-			include: [][]interface{}{
+			include: [][]any{
 				r("Bob", "2015-01-01"),
 				r("Bob", "2015-07-07"),
 				r("Bob", "2015-12-31"),
 			},
-			exclude: [][]interface{}{
+			exclude: [][]any{
 				r("Alice", "2015-07-07"),
 				r("Bob", "2014-12-31"),
 				r("Bob", "2016-01-01"),
@@ -541,31 +525,31 @@ func TestKeyRange(t *testing.T) {
 		},
 		{
 			kr: closedClosed(r("Bob", "2000-01-01"), r("Bob")),
-			include: [][]interface{}{
+			include: [][]any{
 				r("Bob", "2000-01-01"),
 				r("Bob", "2022-07-07"),
 			},
-			exclude: [][]interface{}{
+			exclude: [][]any{
 				r("Alice", "2015-07-07"),
 				r("Bob", "1999-11-07"),
 			},
 		},
 		{
 			kr: closedClosed(r("Bob"), r("Bob")),
-			include: [][]interface{}{
+			include: [][]any{
 				r("Bob", "2000-01-01"),
 			},
-			exclude: [][]interface{}{
+			exclude: [][]any{
 				r("Alice", "2015-07-07"),
 				r("Charlie", "1999-11-07"),
 			},
 		},
 		{
 			kr: halfOpen(r("Bob"), r("Bob", "2000-01-01")),
-			include: [][]interface{}{
+			include: [][]any{
 				r("Bob", "1999-11-07"),
 			},
-			exclude: [][]interface{}{
+			exclude: [][]any{
 				r("Alice", "1999-11-07"),
 				r("Bob", "2000-01-01"),
 				r("Bob", "2004-07-07"),
@@ -574,10 +558,10 @@ func TestKeyRange(t *testing.T) {
 		},
 		{
 			kr: openOpen(r("Bob", "1999-11-06"), r("Bob", "2000-01-01")),
-			include: [][]interface{}{
+			include: [][]any{
 				r("Bob", "1999-11-07"),
 			},
-			exclude: [][]interface{}{
+			exclude: [][]any{
 				r("Alice", "1999-11-07"),
 				r("Bob", "1999-11-06"),
 				r("Bob", "2000-01-01"),
@@ -587,7 +571,7 @@ func TestKeyRange(t *testing.T) {
 		},
 		{
 			kr: closedClosed(r(), r()),
-			include: [][]interface{}{
+			include: [][]any{
 				r("Alice", "1999-11-07"),
 				r("Bob", "1999-11-07"),
 				r("Charlie", "1999-11-07"),
@@ -595,12 +579,12 @@ func TestKeyRange(t *testing.T) {
 		},
 		{
 			kr: halfOpen(r("A"), r("D")),
-			include: [][]interface{}{
+			include: [][]any{
 				r("Alice", "1999-11-07"),
 				r("Bob", "1999-11-07"),
 				r("Charlie", "1999-11-07"),
 			},
-			exclude: [][]interface{}{
+			exclude: [][]any{
 				r("0day", "1999-11-07"),
 				r("Doris", "1999-11-07"),
 			},
@@ -610,7 +594,7 @@ func TestKeyRange(t *testing.T) {
 			kr:   halfOpen(r("Alpha"), r("Charlie")),
 			desc: []bool{true, false},
 			// Key range is backwards, so nothing should be returned.
-			exclude: [][]interface{}{
+			exclude: [][]any{
 				r("Alice", "1999-11-07"),
 				r("Bob", "1999-11-07"),
 				r("Doris", "1999-11-07"),
@@ -620,12 +604,12 @@ func TestKeyRange(t *testing.T) {
 			kr:   halfOpen(r("Alice", "1999-11-07"), r("Charlie")),
 			desc: []bool{false, true},
 			// The second primary key column is descending.
-			include: [][]interface{}{
+			include: [][]any{
 				r("Alice", "1999-09-09"),
 				r("Alice", "1999-11-07"),
 				r("Bob", "2000-01-01"),
 			},
-			exclude: [][]interface{}{
+			exclude: [][]any{
 				r("Alice", "2000-01-01"),
 				r("Doris", "1999-11-07"),
 			},
@@ -645,7 +629,7 @@ func TestKeyRange(t *testing.T) {
 			tbl.insertRow(rowNum, pk)
 		}
 		start, end := tbl.findRange(test.kr)
-		has := func(pk []interface{}) bool {
+		has := func(pk []any) bool {
 			n, _ := tbl.rowForPK(pk)
 			return start <= n && n < end
 		}
@@ -763,56 +747,56 @@ func TestCreateAndManageChangeStream(t *testing.T) {
 func TestConcatFunction(t *testing.T) {
 	tests := []struct {
 		desc   string
-		values []interface{}
+		values []any
 		types  []spansql.Type
-		want   interface{}
+		want   any
 		wantT  spansql.Type
 		err    bool
 	}{
 		{
 			desc:   "Concatenate two strings",
-			values: []interface{}{"Hello", " World"},
+			values: []any{"Hello", " World"},
 			types:  []spansql.Type{{Base: spansql.String}, {Base: spansql.String}},
 			want:   "Hello World",
 			wantT:  spansql.Type{Base: spansql.String},
 		},
 		{
 			desc:   "Concatenate four strings",
-			values: []interface{}{"A", "B", "C", "D"},
+			values: []any{"A", "B", "C", "D"},
 			types:  []spansql.Type{{Base: spansql.String}, {Base: spansql.String}, {Base: spansql.String}, {Base: spansql.String}},
 			want:   "ABCD",
 			wantT:  spansql.Type{Base: spansql.String},
 		},
 		{
 			desc:   "Single string",
-			values: []interface{}{"test"},
+			values: []any{"test"},
 			types:  []spansql.Type{{Base: spansql.String}},
 			want:   "test",
 			wantT:  spansql.Type{Base: spansql.String},
 		},
 		{
 			desc:   "NULL in arguments returns NULL",
-			values: []interface{}{"Hello", nil, "World"},
+			values: []any{"Hello", nil, "World"},
 			types:  []spansql.Type{{Base: spansql.String}, {Base: spansql.String}, {Base: spansql.String}},
 			want:   nil,
 			wantT:  spansql.Type{Base: spansql.String},
 		},
 		{
 			desc:   "Empty strings",
-			values: []interface{}{"", "test", ""},
+			values: []any{"", "test", ""},
 			types:  []spansql.Type{{Base: spansql.String}, {Base: spansql.String}, {Base: spansql.String}},
 			want:   "test",
 			wantT:  spansql.Type{Base: spansql.String},
 		},
 		{
 			desc:   "No arguments - error",
-			values: []interface{}{},
+			values: []any{},
 			types:  []spansql.Type{},
 			err:    true,
 		},
 		{
 			desc:   "Bytes concatenation",
-			values: []interface{}{[]byte("Hello"), []byte(" "), []byte("World")},
+			values: []any{[]byte("Hello"), []byte(" "), []byte("World")},
 			types:  []spansql.Type{{Base: spansql.Bytes}, {Base: spansql.Bytes}, {Base: spansql.Bytes}},
 			want:   "Hello World",
 			wantT:  spansql.Type{Base: spansql.String},

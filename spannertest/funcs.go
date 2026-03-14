@@ -32,7 +32,7 @@ func firstErr(errors []error) error {
 
 var functions = map[string]function{
 	"STARTS_WITH": {
-		Eval: func(values []interface{}, types []spansql.Type) (interface{}, spansql.Type, error) {
+		Eval: func(values []any, types []spansql.Type) (any, spansql.Type, error) {
 			// TODO: Refine error messages to exactly match Spanner.
 			// Check input values first.
 			if len(values) != 2 {
@@ -50,7 +50,7 @@ var functions = map[string]function{
 		},
 	},
 	"LOWER": {
-		Eval: func(values []interface{}, types []spansql.Type) (interface{}, spansql.Type, error) {
+		Eval: func(values []any, types []spansql.Type) (any, spansql.Type, error) {
 			if len(values) != 1 {
 				return nil, spansql.Type{}, status.Error(codes.InvalidArgument, "No matching signature for function LOWER for the given argument types")
 			}
@@ -93,17 +93,17 @@ var functions = map[string]function{
 		},
 	},
 	"CAST": {
-		Eval: func(values []interface{}, types []spansql.Type) (interface{}, spansql.Type, error) {
+		Eval: func(values []any, types []spansql.Type) (any, spansql.Type, error) {
 			return cast(values, types, false)
 		},
 	},
 	"SAFE_CAST": {
-		Eval: func(values []interface{}, types []spansql.Type) (interface{}, spansql.Type, error) {
+		Eval: func(values []any, types []spansql.Type) (any, spansql.Type, error) {
 			return cast(values, types, true)
 		},
 	},
 	"JSON_VALUE": {
-		Eval: func(values []interface{}, types []spansql.Type) (interface{}, spansql.Type, error) {
+		Eval: func(values []any, types []spansql.Type) (any, spansql.Type, error) {
 			if len(values) != 2 {
 				return nil, spansql.Type{}, status.Error(codes.InvalidArgument, "No matching signature for function JSON_VALUE for the given argument types")
 			}
@@ -122,7 +122,7 @@ var functions = map[string]function{
 		},
 	},
 	"EXTRACT": {
-		Eval: func(values []interface{}, types []spansql.Type) (interface{}, spansql.Type, error) {
+		Eval: func(values []any, types []spansql.Type) (any, spansql.Type, error) {
 			date, okArg1 := values[0].(civil.Date)
 			part, okArg2 := values[0].(int64)
 			if !(okArg1 || okArg2) {
@@ -135,7 +135,7 @@ var functions = map[string]function{
 		},
 	},
 	"TIMESTAMP": {
-		Eval: func(values []interface{}, types []spansql.Type) (interface{}, spansql.Type, error) {
+		Eval: func(values []any, types []spansql.Type) (any, spansql.Type, error) {
 			t, okArg1 := values[0].(string)
 			if !(okArg1) {
 				return nil, spansql.Type{}, status.Error(codes.InvalidArgument, "No matching signature for function TIMESTAMP for the given argument types")
@@ -148,7 +148,7 @@ var functions = map[string]function{
 		},
 	},
 	"FARM_FINGERPRINT": {
-		Eval: func(values []interface{}, types []spansql.Type) (interface{}, spansql.Type, error) {
+		Eval: func(values []any, types []spansql.Type) (any, spansql.Type, error) {
 			// Check input values first.
 			if len(values) != 1 {
 				return nil, spansql.Type{}, status.Error(codes.InvalidArgument, "No matching signature for function FARM_FINGERPRINT for the given argument types")
@@ -165,7 +165,7 @@ var functions = map[string]function{
 		},
 	},
 	"MOD": {
-		Eval: func(values []interface{}, types []spansql.Type) (interface{}, spansql.Type, error) {
+		Eval: func(values []any, types []spansql.Type) (any, spansql.Type, error) {
 			// Check input values first.
 			if len(values) != 2 {
 				return nil, spansql.Type{}, status.Error(codes.InvalidArgument, "No matching signature for function MOD for the given argument types")
@@ -183,7 +183,7 @@ var functions = map[string]function{
 	},
 }
 
-func cast(values []interface{}, types []spansql.Type, safe bool) (interface{}, spansql.Type, error) {
+func cast(values []any, types []spansql.Type, safe bool) (any, spansql.Type, error) {
 	name := "CAST"
 	if safe {
 		name = "SAFE_CAST"
@@ -204,12 +204,12 @@ func cast(values []interface{}, types []spansql.Type, safe bool) (interface{}, s
 	return values[0], types[0], nil
 }
 
-func convert(val interface{}, tp spansql.Type) (interface{}, error) {
+func convert(val any, tp spansql.Type) (any, error) {
 	// TODO: Implement more conversions.
 	if tp.Array {
 		return nil, status.Errorf(codes.Unimplemented, "conversion to ARRAY types is not implemented")
 	}
-	var res interface{}
+	var res any
 	var convertErr, err error
 	switch tp.Base {
 	case spansql.Int64:
@@ -241,7 +241,7 @@ func convert(val interface{}, tp spansql.Type) (interface{}, error) {
 	return nil, status.Errorf(codes.Unimplemented, "unsupported conversion for %v to %v", val, tp.Base.SQL())
 }
 
-func convertToInt64(val interface{}) (res int64, convertErr error, err error) {
+func convertToInt64(val any) (res int64, convertErr error, err error) {
 	switch v := val.(type) {
 	case int64:
 		return v, nil, nil
@@ -255,7 +255,7 @@ func convertToInt64(val interface{}) (res int64, convertErr error, err error) {
 	return 0, nil, status.Errorf(codes.Unimplemented, "unsupported conversion for %v to INT64", val)
 }
 
-func convertToFloat64(val interface{}) (res float64, convertErr error, err error) {
+func convertToFloat64(val any) (res float64, convertErr error, err error) {
 	switch v := val.(type) {
 	case int64:
 		return float64(v), nil, nil
@@ -271,7 +271,7 @@ func convertToFloat64(val interface{}) (res float64, convertErr error, err error
 	return 0, nil, status.Errorf(codes.Unimplemented, "unsupported conversion for %v to FLOAT64", val)
 }
 
-func convertToString(val interface{}) (res string, convertErr error, err error) {
+func convertToString(val any) (res string, convertErr error, err error) {
 	switch v := val.(type) {
 	case string:
 		return v, nil, nil
@@ -285,7 +285,7 @@ func convertToString(val interface{}) (res string, convertErr error, err error) 
 	return "", nil, status.Errorf(codes.Unimplemented, "unsupported conversion for %v to STRING", val)
 }
 
-func convertToBool(val interface{}) (res bool, convertErr error, err error) {
+func convertToBool(val any) (res bool, convertErr error, err error) {
 	switch v := val.(type) {
 	case bool:
 		return v, nil, nil
@@ -299,7 +299,7 @@ func convertToBool(val interface{}) (res bool, convertErr error, err error) {
 	return false, nil, status.Errorf(codes.Unimplemented, "unsupported conversion for %v to BOOL", val)
 }
 
-func convertToDate(val interface{}) (res civil.Date, convertErr error, err error) {
+func convertToDate(val any) (res civil.Date, convertErr error, err error) {
 	switch v := val.(type) {
 	case civil.Date:
 		return v, nil, nil
@@ -313,7 +313,7 @@ func convertToDate(val interface{}) (res civil.Date, convertErr error, err error
 	return civil.Date{}, nil, status.Errorf(codes.Unimplemented, "unsupported conversion for %v to DATE", val)
 }
 
-func convertToTimestamp(val interface{}) (res time.Time, convertErr error, err error) {
+func convertToTimestamp(val any) (res time.Time, convertErr error, err error) {
 	switch v := val.(type) {
 	case time.Time:
 		return v, nil, nil
@@ -327,7 +327,7 @@ func convertToTimestamp(val interface{}) (res time.Time, convertErr error, err e
 	return time.Time{}, nil, status.Errorf(codes.Unimplemented, "unsupported conversion for %v to TIMESTAMP", val)
 }
 
-func convertToNumeric(val interface{}) (res *big.Rat, convertErr error, err error) {
+func convertToNumeric(val any) (res *big.Rat, convertErr error, err error) {
 	switch v := val.(type) {
 	case *big.Rat:
 		return v, nil, nil
@@ -351,7 +351,7 @@ type aggregateFunc struct {
 	AcceptStar bool
 
 	// Every aggregate func takes one expression.
-	Eval func(values []interface{}, typ spansql.Type) (interface{}, spansql.Type, error)
+	Eval func(values []any, typ spansql.Type) (any, spansql.Type, error)
 
 	// TODO: Handle qualifiers such as DISTINCT.
 }
@@ -360,7 +360,7 @@ type aggregateFunc struct {
 var aggregateFuncs = map[string]aggregateFunc{
 	"ANY_VALUE": {
 		// https://cloud.google.com/spanner/docs/aggregate_functions#any_value
-		Eval: func(values []interface{}, typ spansql.Type) (interface{}, spansql.Type, error) {
+		Eval: func(values []any, typ spansql.Type) (any, spansql.Type, error) {
 			// Return the first non-NULL value.
 			for _, v := range values {
 				if v != nil {
@@ -373,7 +373,7 @@ var aggregateFuncs = map[string]aggregateFunc{
 	},
 	"ARRAY_AGG": {
 		// https://cloud.google.com/spanner/docs/aggregate_functions#array_agg
-		Eval: func(values []interface{}, typ spansql.Type) (interface{}, spansql.Type, error) {
+		Eval: func(values []any, typ spansql.Type) (any, spansql.Type, error) {
 			if typ.Array {
 				return nil, spansql.Type{}, fmt.Errorf("ARRAY_AGG unsupported on values of type %v", typ.SQL())
 			}
@@ -387,7 +387,7 @@ var aggregateFuncs = map[string]aggregateFunc{
 	},
 	"COUNT": {
 		AcceptStar: true,
-		Eval: func(values []interface{}, typ spansql.Type) (interface{}, spansql.Type, error) {
+		Eval: func(values []any, typ spansql.Type) (any, spansql.Type, error) {
 			// Count the number of non-NULL values.
 			// COUNT(*) receives a list of non-NULL placeholders rather than values,
 			// so every value will be non-NULL.
@@ -400,14 +400,14 @@ var aggregateFuncs = map[string]aggregateFunc{
 			return n, int64Type, nil
 		},
 	},
-	"MAX": {Eval: func(values []interface{}, typ spansql.Type) (interface{}, spansql.Type, error) {
+	"MAX": {Eval: func(values []any, typ spansql.Type) (any, spansql.Type, error) {
 		return evalMinMax("MAX", false, values, typ)
 	}},
-	"MIN": {Eval: func(values []interface{}, typ spansql.Type) (interface{}, spansql.Type, error) {
+	"MIN": {Eval: func(values []any, typ spansql.Type) (any, spansql.Type, error) {
 		return evalMinMax("MIN", true, values, typ)
 	}},
 	"SUM": {
-		Eval: func(values []interface{}, typ spansql.Type) (interface{}, spansql.Type, error) {
+		Eval: func(values []any, typ spansql.Type) (any, spansql.Type, error) {
 			if typ.Array || !(typ.Base == spansql.Int64 || typ.Base == spansql.Float64) {
 				return nil, spansql.Type{}, fmt.Errorf("SUM only supports arguments of INT64 or FLOAT64 type, not %s", typ.SQL())
 			}
@@ -444,7 +444,7 @@ var aggregateFuncs = map[string]aggregateFunc{
 		},
 	},
 	"AVG": {
-		Eval: func(values []interface{}, typ spansql.Type) (interface{}, spansql.Type, error) {
+		Eval: func(values []any, typ spansql.Type) (any, spansql.Type, error) {
 			if typ.Array || !(typ.Base == spansql.Int64 || typ.Base == spansql.Float64) {
 				return nil, spansql.Type{}, fmt.Errorf("AVG only supports arguments of INT64 or FLOAT64 type, not %s", typ.SQL())
 			}
@@ -482,7 +482,7 @@ var aggregateFuncs = map[string]aggregateFunc{
 	},
 }
 
-func evalMinMax(name string, isMin bool, values []interface{}, typ spansql.Type) (interface{}, spansql.Type, error) {
+func evalMinMax(name string, isMin bool, values []any, typ spansql.Type) (any, spansql.Type, error) {
 	if typ.Array {
 		return nil, spansql.Type{}, fmt.Errorf("%s only supports non-array arguments, not %s", name, typ.SQL())
 	}
@@ -493,7 +493,7 @@ func evalMinMax(name string, isMin bool, values []interface{}, typ spansql.Type)
 
 	// Compute running MIN/MAX.
 	// "Returns NULL if ... expression evaluates to NULL for all rows".
-	var minMax interface{}
+	var minMax any
 	for _, v := range values {
 		if v == nil {
 			// "Returns the {maximum|minimum} value of non-NULL expressions".

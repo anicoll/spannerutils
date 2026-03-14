@@ -33,16 +33,16 @@ type evalContext struct {
 // coercedValue represents a literal value that has been coerced to a different type.
 // This never leaves this package, nor is persisted.
 type coercedValue struct {
-	spansql.Expr             // not a real Expr
-	val          interface{} // internal representation
+	spansql.Expr     // not a real Expr
+	val          any // internal representation
 	// TODO: type?
 	orig spansql.Expr
 }
 
 func (cv coercedValue) SQL() string { return cv.orig.SQL() }
 
-func (ec evalContext) evalExprList(list []spansql.Expr) ([]interface{}, error) {
-	var out []interface{}
+func (ec evalContext) evalExprList(list []spansql.Expr) ([]any, error) {
+	var out []any
 	for _, e := range list {
 		x, err := ec.evalExpr(e)
 		if err != nil {
@@ -222,7 +222,7 @@ func (ec evalContext) evalBoolExpr(be spansql.BoolExpr) (*bool, error) {
 	}
 }
 
-func (ec evalContext) evalArithOp(e spansql.ArithOp) (interface{}, error) {
+func (ec evalContext) evalArithOp(e spansql.ArithOp) (any, error) {
 	// TODO: Better NULL handling
 	switch e.Op {
 	case spansql.Neg:
@@ -370,10 +370,10 @@ func (ec evalContext) evalArithOp(e spansql.ArithOp) (interface{}, error) {
 	return nil, fmt.Errorf("TODO: evalArithOp(%s %v)", e.SQL(), e.Op)
 }
 
-func (ec evalContext) evalFunc(e spansql.Func) (interface{}, spansql.Type, error) {
+func (ec evalContext) evalFunc(e spansql.Func) (any, spansql.Type, error) {
 	var err error
 	if f, ok := functions[e.Name]; ok {
-		args := make([]interface{}, len(e.Args))
+		args := make([]any, len(e.Args))
 		types := make([]spansql.Type, len(e.Args))
 		for i, arg := range e.Args {
 			if args[i], err = ec.evalExpr(arg); err != nil {
@@ -398,7 +398,7 @@ func (ec evalContext) evalFloat64(e spansql.Expr) (float64, error) {
 	return asFloat64(e, v)
 }
 
-func asFloat64(e spansql.Expr, v interface{}) (float64, error) {
+func asFloat64(e spansql.Expr, v any) (float64, error) {
 	switch v := v.(type) {
 	default:
 		return 0, fmt.Errorf("expression %s evaluates to %T, want FLOAT64 or INT64", e.SQL(), v)
@@ -409,11 +409,11 @@ func asFloat64(e spansql.Expr, v interface{}) (float64, error) {
 	}
 }
 
-func (ec evalContext) evalExpr(e spansql.Expr) (interface{}, error) {
+func (ec evalContext) evalExpr(e spansql.Expr) (any, error) {
 	// Several cases below are handled by this.
 	// It evaluates a BoolExpr (which returns *bool for a tri-state BOOL)
 	// and converts it to true/false/nil.
-	evalBool := func(be spansql.BoolExpr) (interface{}, error) {
+	evalBool := func(be spansql.BoolExpr) (any, error) {
 		b, err := ec.evalBoolExpr(be)
 		if err != nil {
 			return nil, err
@@ -466,7 +466,7 @@ func (ec evalContext) evalExpr(e spansql.Expr) (interface{}, error) {
 		}
 		return v, nil
 	case spansql.Array:
-		var arr []interface{}
+		var arr []any
 		for _, elt := range e {
 			v, err := ec.evalExpr(elt)
 			if err != nil {
@@ -515,7 +515,7 @@ func (ec evalContext) evalExpr(e spansql.Expr) (interface{}, error) {
 					// "IN UNNEST(<NULL array>) returns FALSE (not NULL)".
 					return e.Neg, nil
 				}
-				arr, ok := rhs.([]interface{})
+				arr, ok := rhs.([]any)
 				if !ok {
 					return nil, fmt.Errorf("UNNEST argument evaluated as %T, want array", rhs)
 				}
@@ -569,7 +569,7 @@ func (ec evalContext) resolveColumnIndex(e spansql.Expr) (int, error) {
 	return 0, fmt.Errorf("couldn't resolve [%s] as a table column", e.SQL())
 }
 
-func (ec evalContext) evalPathExp(pe spansql.PathExp) (interface{}, error) {
+func (ec evalContext) evalPathExp(pe spansql.PathExp) (any, error) {
 	// TODO: support more than only naming an aliased table column.
 	if i, err := ec.resolveColumnIndex(pe); err == nil {
 		return ec.row.copyDataElem(i), nil
@@ -577,7 +577,7 @@ func (ec evalContext) evalPathExp(pe spansql.PathExp) (interface{}, error) {
 	return nil, fmt.Errorf("couldn't resolve path expression %s", pe.SQL())
 }
 
-func (ec evalContext) evalID(id spansql.ID) (interface{}, error) {
+func (ec evalContext) evalID(id spansql.ID) (any, error) {
 	if i, err := ec.resolveColumnIndex(id); err == nil {
 		return ec.row.copyDataElem(i), nil
 	}
@@ -667,7 +667,7 @@ func (ec evalContext) coerceString(target spansql.Expr, slit spansql.StringLiter
 	return nil, fmt.Errorf("unable to coerce string literal %q to match %v", slit, ci.Type)
 }
 
-func (ec evalContext) evalTypedExpr(expr spansql.TypedExpr) (result interface{}, err error) {
+func (ec evalContext) evalTypedExpr(expr spansql.TypedExpr) (result any, err error) {
 	val, err := ec.evalExpr(expr.Expr)
 	if err != nil {
 		return nil, err
@@ -675,7 +675,7 @@ func (ec evalContext) evalTypedExpr(expr spansql.TypedExpr) (result interface{},
 	return convert(val, expr.Type)
 }
 
-func (ec evalContext) evalExtractExpr(expr spansql.ExtractExpr) (result interface{}, err error) {
+func (ec evalContext) evalExtractExpr(expr spansql.ExtractExpr) (result any, err error) {
 	val, err := ec.evalExpr(expr.Expr)
 	if err != nil {
 		return nil, err
@@ -713,7 +713,7 @@ func (ec evalContext) evalExtractExpr(expr spansql.ExtractExpr) (result interfac
 	return nil, fmt.Errorf("extract with part %v not supported", expr.Part)
 }
 
-func (ec evalContext) evalAtTimeZoneExpr(expr spansql.AtTimeZoneExpr) (result interface{}, err error) {
+func (ec evalContext) evalAtTimeZoneExpr(expr spansql.AtTimeZoneExpr) (result any, err error) {
 	val, err := ec.evalExpr(expr.Expr)
 	if err != nil {
 		return nil, err
@@ -762,7 +762,7 @@ func paramAsInteger(p spansql.Param, params queryParams) (int64, error) {
 
 // compareValLists compares pair-wise elements of a and b.
 // If desc is not nil, it indicates which comparisons should be reversed.
-func compareValLists(a, b []interface{}, desc []bool) int {
+func compareValLists(a, b []any, desc []bool) int {
 	for i := range a {
 		cmp := compareVals(a[i], b[i])
 		if cmp == 0 {
@@ -776,7 +776,7 @@ func compareValLists(a, b []interface{}, desc []bool) int {
 	return 0
 }
 
-func compareVals(x, y interface{}) int {
+func compareVals(x, y any) int {
 	// NULL is always the minimum possible value.
 	if x == nil && y == nil {
 		return 0

@@ -1,0 +1,54 @@
+name: PR Validation
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+  push:
+    branches:
+      - main
+
+env:
+  GOLANGCILINT_VERSION: "v2.11.3"
+
+jobs:
+  validate:
+    name: Build and Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Tidy dependencies
+        run: make tidy
+
+      - name: Check formatting
+        run: |
+          make format
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "Code is not formatted. Please run 'make format'"
+            git diff
+            exit 1
+          fi
+
+      - name: Run go vet
+        run: make vet
+
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: ${{ env.GOLANGCILINT_VERSION }}
+          skip-cache: true
+
+      - name: Build
+        run: make build
+
+      - name: Run tests
+        run: make test
