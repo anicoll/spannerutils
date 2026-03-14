@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/civil"
-	"cloud.google.com/go/spanner/spansql"
+	"github.com/anicoll/spannerutils/spansql"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

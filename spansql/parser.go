@@ -3821,13 +3821,23 @@ func (p *parser) parseSelectFromTable() (SelectFrom, *parseError) {
 		sf.Hints = hints
 	}
 
-	// TODO: The "AS" keyword is optional.
+	// The "AS" keyword is optional; a bare identifier is also a valid alias.
 	if p.eat("AS") {
 		alias, err := p.parseAlias()
 		if err != nil {
 			return nil, err
 		}
 		sf.Alias = alias
+	} else {
+		// Peek at the next token: if it is an identifier that is not a reserved
+		// keyword, treat it as a table alias (e.g. "FROM Staff s2").
+		orig := *p
+		tok := p.next()
+		if tok.err == nil && (tok.typ == unquotedID || tok.typ == quotedID) && !IsKeyword(tok.value) {
+			sf.Alias = ID(tok.value)
+		} else {
+			*p = orig
+		}
 	}
 	return sf, nil
 }

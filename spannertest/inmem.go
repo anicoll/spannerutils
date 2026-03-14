@@ -60,7 +60,7 @@ import (
 	structpb "google.golang.org/protobuf/types/known/structpb"
 
 	"cloud.google.com/go/civil"
-	"cloud.google.com/go/spanner/spansql"
+	"github.com/anicoll/spannerutils/spansql"
 )
 
 // Server is an in-memory Cloud Spanner fake.

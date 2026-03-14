@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/civil"
-	"cloud.google.com/go/spanner/spansql"
+	"github.com/anicoll/spannerutils/spansql"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -34,6 +34,10 @@ type evalContext struct {
 	// Database and query context for evaluating subqueries.
 	db *database
 	qc *queryContext
+
+	// outer is the enclosing evalContext for correlated subqueries.
+	// Column references that cannot be resolved locally are looked up here.
+	outer *evalContext
 }
 
 // coercedValue represents a literal value that has been coerced to a different type.
@@ -568,7 +572,8 @@ func (ec evalContext) evalExpr(e spansql.Expr) (interface{}, error) {
 	}
 }
 
-// resolveColumnIndex turns an ID or PathExp into a table column index.
+// resolveColumnIndex turns an ID or PathExp into a table column index within
+// the current context only (does not walk outer scopes).
 func (ec evalContext) resolveColumnIndex(e spansql.Expr) (int, error) {
 	switch e := e.(type) {
 	case spansql.ID:
@@ -587,17 +592,29 @@ func (ec evalContext) resolveColumnIndex(e spansql.Expr) (int, error) {
 	return 0, fmt.Errorf("couldn't resolve [%s] as a table column", e.SQL())
 }
 
-func (ec evalContext) evalPathExp(pe spansql.PathExp) (interface{}, error) {
-	// TODO: support more than only naming an aliased table column.
-	if i, err := ec.resolveColumnIndex(pe); err == nil {
+// resolveColumn looks up an ID or PathExp in the current context and, if not
+// found, in enclosing outer contexts (for correlated subqueries). It returns
+// the value directly because the column may live in a different row from ec.row.
+func (ec evalContext) resolveColumn(e spansql.Expr) (interface{}, error) {
+	if i, err := ec.resolveColumnIndex(e); err == nil {
 		return ec.row.copyDataElem(i), nil
 	}
-	return nil, fmt.Errorf("couldn't resolve path expression %s", pe.SQL())
+	if ec.outer != nil {
+		return ec.outer.resolveColumn(e)
+	}
+	return nil, fmt.Errorf("couldn't resolve [%s] as a table column", e.SQL())
+}
+
+func (ec evalContext) evalPathExp(pe spansql.PathExp) (interface{}, error) {
+	// TODO: support more than only naming an aliased table column.
+	return ec.resolveColumn(pe)
 }
 
 // execSubquery executes a subquery reusing the parent's locked query context.
+// The current evalContext is passed as the outer scope so that correlated
+// references (e.g. Staff.ID in a subquery WHERE clause) can be resolved.
 func (ec evalContext) execSubquery(q spansql.Query) (rowIter, error) {
-	si, err := ec.db.evalSelect(q.Select, ec.qc)
+	si, err := ec.db.evalSelectWithOuter(q.Select, ec.qc, &ec)
 	if err != nil {
 		return nil, err
 	}
@@ -726,8 +743,8 @@ func (ec evalContext) evalExistsOp(eo spansql.ExistsOp) (bool, error) {
 }
 
 func (ec evalContext) evalID(id spansql.ID) (interface{}, error) {
-	if i, err := ec.resolveColumnIndex(id); err == nil {
-		return ec.row.copyDataElem(i), nil
+	if v, err := ec.resolveColumn(id); err == nil {
+		return v, nil
 	}
 	if e, ok := ec.aliases[id]; ok {
 		// Make a copy of the context without this alias
