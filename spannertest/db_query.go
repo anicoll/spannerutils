@@ -402,8 +402,126 @@ func (d *database) queryContext(q spansql.Query, params queryParams) (*queryCont
 			return nil
 		}
 	}
+
+	// Walk expression trees to find subqueries and their tables
+	var findTablesInExpr func(expr spansql.Expr) error
+	findTablesInExpr = func(expr spansql.Expr) error {
+		switch e := expr.(type) {
+		case spansql.ScalarSubquery:
+			// Process the subquery's FROM clause
+			for _, sf := range e.Query.Select.From {
+				if err := findTables(sf); err != nil {
+					return err
+				}
+			}
+			// Recursively check the subquery's SELECT list and WHERE clause
+			for _, listExpr := range e.Query.Select.List {
+				if err := findTablesInExpr(listExpr); err != nil {
+					return err
+				}
+			}
+			if e.Query.Select.Where != nil {
+				if err := findTablesInExpr(e.Query.Select.Where); err != nil {
+					return err
+				}
+			}
+		case spansql.ArraySubquery:
+			// Process the subquery's FROM clause
+			for _, sf := range e.Query.Select.From {
+				if err := findTables(sf); err != nil {
+					return err
+				}
+			}
+			// Recursively check the subquery's SELECT list and WHERE clause
+			for _, listExpr := range e.Query.Select.List {
+				if err := findTablesInExpr(listExpr); err != nil {
+					return err
+				}
+			}
+			if e.Query.Select.Where != nil {
+				if err := findTablesInExpr(e.Query.Select.Where); err != nil {
+					return err
+				}
+			}
+		case spansql.ExistsOp:
+			// Process the EXISTS subquery's FROM clause
+			for _, sf := range e.Subquery.Select.From {
+				if err := findTables(sf); err != nil {
+					return err
+				}
+			}
+			// Recursively check the EXISTS subquery's SELECT list and WHERE clause
+			for _, listExpr := range e.Subquery.Select.List {
+				if err := findTablesInExpr(listExpr); err != nil {
+					return err
+				}
+			}
+			if e.Subquery.Select.Where != nil {
+				if err := findTablesInExpr(e.Subquery.Select.Where); err != nil {
+					return err
+				}
+			}
+		case spansql.Paren:
+			return findTablesInExpr(e.Expr)
+		case spansql.Func:
+			for _, arg := range e.Args {
+				if err := findTablesInExpr(arg); err != nil {
+					return err
+				}
+			}
+		case spansql.ArithOp:
+			if e.LHS != nil {
+				if err := findTablesInExpr(e.LHS); err != nil {
+					return err
+				}
+			}
+			if e.RHS != nil {
+				if err := findTablesInExpr(e.RHS); err != nil {
+					return err
+				}
+			}
+		case spansql.LogicalOp:
+			if err := findTablesInExpr(e.LHS); err != nil {
+				return err
+			}
+			if err := findTablesInExpr(e.RHS); err != nil {
+				return err
+			}
+		case spansql.ComparisonOp:
+			if err := findTablesInExpr(e.LHS); err != nil {
+				return err
+			}
+			if err := findTablesInExpr(e.RHS); err != nil {
+				return err
+			}
+		case spansql.IsOp:
+			if err := findTablesInExpr(e.LHS); err != nil {
+				return err
+			}
+			if err := findTablesInExpr(e.RHS); err != nil {
+				return err
+			}
+		// For other expression types (literals, IDs, etc.), no subqueries to find
+		}
+		return nil
+	}
+
 	for _, sf := range q.Select.From {
 		if err := findTables(sf); err != nil {
+			return nil, err
+		}
+	}
+
+	// Find tables in SELECT list
+	for _, expr := range q.Select.List {
+		if err := findTablesInExpr(expr); err != nil {
+			return nil, err
+		}
+	}
+
+	// Find tables in WHERE clause
+	if q.Select.Where != nil {
+		if err := findTablesInExpr(q.Select.Where); err != nil {
 			return nil, err
 		}
 	}
@@ -425,6 +543,18 @@ func (d *database) evalSelect(sel spansql.Select, qc *queryContext) (si *selIter
 	var ri rowIter = &nullIter{}
 	ec := evalContext{
 		params: qc.params,
+		db:     d,
+		qc:     qc,
+	}
+
+	// Make a copy of sel.List to avoid mutating the original query's slice.
+	// evalSelect modifies sel.List to replace aggregate Funcs with aggSentinel,
+	// and since slices share underlying arrays, repeated calls (e.g. subquery
+	// evaluated for each outer row) would see stale aggSentinel entries.
+	if len(sel.List) > 0 {
+		list := make([]spansql.Expr, len(sel.List))
+		copy(list, sel.List)
+		sel.List = list
 	}
 
 	// First stage is to identify the data source.

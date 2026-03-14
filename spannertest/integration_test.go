@@ -980,6 +980,49 @@ func TestIntegration_ReadsAndQueries(t *testing.T) {
 				{"Jack"},
 			},
 		},
+		// Scalar subquery tests
+		{
+			`SELECT (SELECT MAX(ID) FROM Staff) AS max_id`,
+			nil,
+			[][]interface{}{{int64(5)}},
+		},
+		{
+			`SELECT Name FROM Staff WHERE ID > (SELECT AVG(ID) FROM Staff) ORDER BY Name`,
+			nil,
+			[][]interface{}{
+				{"George"},
+				{"Teal'c"},
+			},
+		},
+		{
+			`SELECT (SELECT Name FROM Staff WHERE ID = 999) AS not_found`,
+			nil,
+			[][]interface{}{{nil}},
+		},
+		{
+			`SELECT (SELECT COUNT(*) FROM Staff WHERE Cool = TRUE) AS cool_count`,
+			nil,
+			[][]interface{}{{int64(1)}},
+		},
+		// EXISTS subquery tests
+		{
+			`SELECT EXISTS(SELECT * FROM Staff WHERE Name = 'Jack') AS has_jack`,
+			nil,
+			[][]interface{}{{true}},
+		},
+		{
+			`SELECT EXISTS(SELECT * FROM Staff WHERE Name = 'Nobody') AS has_nobody`,
+			nil,
+			[][]interface{}{{false}},
+		},
+		// TODO: Correlated subquery with table alias - requires alias support
+		// {
+		// 	`SELECT Name FROM Staff WHERE EXISTS(SELECT 1 FROM Staff s2 WHERE s2.ID = Staff.ID AND s2.Cool = TRUE) ORDER BY Name`,
+		// 	nil,
+		// 	[][]interface{}{
+		// 		{"Jack"},
+		// 	},
+		// },
 		{
 			`SELECT Name, Height FROM Staff WHERE Height BETWEEN @min AND @max ORDER BY Height DESC`,
 			map[string]interface{}{"min": 1.75, "max": 1.85},
