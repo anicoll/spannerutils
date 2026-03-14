@@ -759,3 +759,106 @@ func TestCreateAndManageChangeStream(t *testing.T) {
 		t.Errorf("Generated SQL statement incorrect.\n got %v\nwant %v", got, want)
 	}
 }
+
+func TestChangeStreamDDLOperations(t *testing.T) {
+	var db database
+
+	// Test creating a change stream
+	createStmt := &spansql.CreateChangeStream{
+		Name: "MyChangeStream",
+		Watch: []spansql.WatchDef{
+			{Table: "Singers", WatchAllCols: true},
+		},
+		Options: spansql.ChangeStreamOptions{
+			RetentionPeriod: func(s string) *string { return &s }("24h"),
+		},
+	}
+	st := db.ApplyDDL(createStmt)
+	if st.Code() != codes.OK {
+		t.Fatalf("Creating change stream failed: %v", st.Err())
+	}
+
+	// Verify the change stream exists
+	if _, ok := db.changeStreams["MyChangeStream"]; !ok {
+		t.Fatal("Change stream was not registered in database")
+	}
+
+	// Test creating duplicate change stream should fail
+	st = db.ApplyDDL(createStmt)
+	if st.Code() != codes.AlreadyExists {
+		t.Errorf("Creating duplicate change stream: got %v, want AlreadyExists", st.Code())
+	}
+
+	// Test altering a change stream
+	alterStmt := &spansql.AlterChangeStream{
+		Name: "MyChangeStream",
+		Alteration: spansql.AlterChangeStreamOptions{
+			Options: spansql.ChangeStreamOptions{
+				RetentionPeriod: func(s string) *string { return &s }("48h"),
+			},
+		},
+	}
+	st = db.ApplyDDL(alterStmt)
+	if st.Code() != codes.OK {
+		t.Fatalf("Altering change stream failed: %v", st.Err())
+	}
+
+	// Test altering non-existent change stream should fail
+	alterNonExistentStmt := &spansql.AlterChangeStream{
+		Name: "NonExistentStream",
+		Alteration: spansql.AlterChangeStreamOptions{
+			Options: spansql.ChangeStreamOptions{
+				RetentionPeriod: func(s string) *string { return &s }("48h"),
+			},
+		},
+	}
+	st = db.ApplyDDL(alterNonExistentStmt)
+	if st.Code() != codes.NotFound {
+		t.Errorf("Altering non-existent change stream: got %v, want NotFound", st.Code())
+	}
+
+	// Test dropping a change stream
+	dropStmt := &spansql.DropChangeStream{
+		Name: "MyChangeStream",
+	}
+	st = db.ApplyDDL(dropStmt)
+	if st.Code() != codes.OK {
+		t.Fatalf("Dropping change stream failed: %v", st.Err())
+	}
+
+	// Verify the change stream was removed
+	if _, ok := db.changeStreams["MyChangeStream"]; ok {
+		t.Fatal("Change stream was not removed from database")
+	}
+
+	// Test dropping non-existent change stream should fail
+	st = db.ApplyDDL(dropStmt)
+	if st.Code() != codes.NotFound {
+		t.Errorf("Dropping non-existent change stream: got %v, want NotFound", st.Code())
+	}
+
+	// Test creating a change stream with FOR ALL
+	createAllStmt := &spansql.CreateChangeStream{
+		Name:           "AllTablesStream",
+		WatchAllTables: true,
+		Options: spansql.ChangeStreamOptions{
+			RetentionPeriod:  func(s string) *string { return &s }("7d"),
+			ValueCaptureType: func(s string) *string { return &s }("NEW_VALUES"),
+		},
+	}
+	st = db.ApplyDDL(createAllStmt)
+	if st.Code() != codes.OK {
+		t.Fatalf("Creating change stream with FOR ALL failed: %v", st.Err())
+	}
+
+	// Verify it exists
+	if _, ok := db.changeStreams["AllTablesStream"]; !ok {
+		t.Fatal("FOR ALL change stream was not registered in database")
+	}
+
+	// Clean up
+	st = db.ApplyDDL(&spansql.DropChangeStream{Name: "AllTablesStream"})
+	if st.Code() != codes.OK {
+		t.Fatalf("Cleanup failed: %v", st.Err())
+	}
+}
