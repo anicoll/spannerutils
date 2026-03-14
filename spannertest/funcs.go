@@ -181,6 +181,42 @@ var functions = map[string]function{
 			return x % y, spansql.Type{Base: spansql.Int64}, nil
 		},
 	},
+	"GREATEST": {
+		Eval: func(values []interface{}, types []spansql.Type) (interface{}, spansql.Type, error) {
+			if len(values) == 0 {
+				return nil, spansql.Type{}, status.Error(codes.InvalidArgument, "GREATEST requires at least one argument")
+			}
+			var result interface{}
+			for _, v := range values {
+				// GREATEST returns NULL if any argument is NULL.
+				if v == nil {
+					return nil, spansql.Type{}, nil
+				}
+				if result == nil || compareVals(v, result) > 0 {
+					result = v
+				}
+			}
+			return result, inferType(result), nil
+		},
+	},
+	"LEAST": {
+		Eval: func(values []interface{}, types []spansql.Type) (interface{}, spansql.Type, error) {
+			if len(values) == 0 {
+				return nil, spansql.Type{}, status.Error(codes.InvalidArgument, "LEAST requires at least one argument")
+			}
+			var result interface{}
+			for _, v := range values {
+				// LEAST returns NULL if any argument is NULL.
+				if v == nil {
+					return nil, spansql.Type{}, nil
+				}
+				if result == nil || compareVals(v, result) < 0 {
+					result = v
+				}
+			}
+			return result, inferType(result), nil
+		},
+	},
 }
 
 func cast(values []interface{}, types []spansql.Type, safe bool) (interface{}, spansql.Type, error) {
@@ -480,6 +516,25 @@ var aggregateFuncs = map[string]aggregateFunc{
 			return (sum / n), typ, nil
 		},
 	},
+}
+
+// inferType returns the spansql.Type corresponding to the Go type of v.
+func inferType(v interface{}) spansql.Type {
+	switch v.(type) {
+	case int64:
+		return spansql.Type{Base: spansql.Int64}
+	case float64:
+		return spansql.Type{Base: spansql.Float64}
+	case string:
+		return spansql.Type{Base: spansql.String}
+	case bool:
+		return spansql.Type{Base: spansql.Bool}
+	case civil.Date:
+		return spansql.Type{Base: spansql.Date}
+	case time.Time:
+		return spansql.Type{Base: spansql.Timestamp}
+	}
+	return spansql.Type{}
 }
 
 func evalMinMax(name string, isMin bool, values []interface{}, typ spansql.Type) (interface{}, spansql.Type, error) {
