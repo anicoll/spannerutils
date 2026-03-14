@@ -461,6 +461,12 @@ func (d *database) queryContext(q spansql.Query, params queryParams) (*queryCont
 					return err
 				}
 			}
+		case spansql.Coalesce:
+			for _, expr := range e.ExprList {
+				if err := findTablesInExpr(expr); err != nil {
+					return err
+				}
+			}
 		case spansql.Paren:
 			return findTablesInExpr(e.Expr)
 		case spansql.Func:
