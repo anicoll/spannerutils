@@ -1078,6 +1078,15 @@ func (ec evalContext) colInfo(e spansql.Expr) (colInfo, error) {
 	case spansql.Paren:
 		return ec.colInfo(e.Expr)
 	case spansql.Func:
+		// GREATEST and LEAST return the same type as their arguments.
+		// We must not call evalFunc here because the row may be empty during
+		// the type-determination phase; instead derive the type from the args.
+		if e.Name == "GREATEST" || e.Name == "LEAST" {
+			if len(e.Args) == 0 {
+				return colInfo{}, fmt.Errorf("%s requires at least one argument", e.Name)
+			}
+			return ec.colInfo(e.Args[0])
+		}
 		// Aggregate functions have distinct return-type rules.
 		if aggFunc, ok := aggregateFuncs[e.Name]; ok {
 			if len(e.Args) == 0 {

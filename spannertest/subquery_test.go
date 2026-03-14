@@ -262,3 +262,93 @@ func TestCorrelatedSubqueryWithJoinHint(t *testing.T) {
 		}
 	}
 }
+
+// TestGreatestLeast covers the GREATEST and LEAST scalar functions.
+func TestGreatestLeast(t *testing.T) {
+	client, adminClient, _, cleanup := makeClient(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := updateDDL(t, adminClient,
+		`CREATE TABLE Vals (
+			ID    INT64 NOT NULL,
+			A     INT64 NOT NULL,
+			B     INT64 NOT NULL,
+			C     INT64 NOT NULL,
+		) PRIMARY KEY (ID)`); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := client.Apply(ctx, []*spanner.Mutation{
+		spanner.Insert("Vals", []string{"ID", "A", "B", "C"}, []interface{}{1, 3, 1, 2}),
+		spanner.Insert("Vals", []string{"ID", "A", "B", "C"}, []interface{}{2, 5, 5, 5}),
+		spanner.Insert("Vals", []string{"ID", "A", "B", "C"}, []interface{}{3, 7, 9, 4}),
+	})
+	if err != nil {
+		t.Fatalf("inserting data: %v", err)
+	}
+
+	tests := []struct {
+		name  string
+		query string
+		want  [][]interface{}
+	}{
+		{
+			name:  "GREATEST of three columns",
+			query: `SELECT GREATEST(A, B, C) FROM Vals ORDER BY ID`,
+			want:  [][]interface{}{{int64(3)}, {int64(5)}, {int64(9)}},
+		},
+		{
+			name:  "LEAST of three columns",
+			query: `SELECT LEAST(A, B, C) FROM Vals ORDER BY ID`,
+			want:  [][]interface{}{{int64(1)}, {int64(5)}, {int64(4)}},
+		},
+		{
+			name:  "GREATEST with literals",
+			query: `SELECT GREATEST(1, 2, 3)`,
+			want:  [][]interface{}{{int64(3)}},
+		},
+		{
+			name:  "LEAST with literals",
+			query: `SELECT LEAST(10, 2, 7)`,
+			want:  [][]interface{}{{int64(2)}},
+		},
+		{
+			name:  "GREATEST returns NULL on any NULL arg",
+			query: `SELECT GREATEST(1, NULL, 3)`,
+			want:  [][]interface{}{{nil}},
+		},
+		{
+			name:  "LEAST returns NULL on any NULL arg",
+			query: `SELECT LEAST(NULL, 2, 3)`,
+			want:  [][]interface{}{{nil}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ri := client.Single().Query(ctx, spanner.NewStatement(tt.query))
+			got, err := slurpRows(t, ri)
+			if err != nil {
+				t.Fatalf("query failed: %v", err)
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %d rows, want %d\n got:  %v\nwant: %v", len(got), len(tt.want), got, tt.want)
+			}
+			for i := range got {
+				if len(got[i]) != len(tt.want[i]) {
+					t.Errorf("row %d: got %d cols, want %d", i, len(got[i]), len(tt.want[i]))
+					continue
+				}
+				for j := range got[i] {
+					if got[i][j] != tt.want[i][j] {
+						t.Errorf("row %d col %d: got %v (%T), want %v (%T)",
+							i, j, got[i][j], got[i][j], tt.want[i][j], tt.want[i][j])
+					}
+				}
+			}
+		})
+	}
+}
