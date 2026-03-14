@@ -9,6 +9,9 @@ on:
     branches:
       - main
 
+env:
+  GOLANGCILINT_VERSION: "v2.11.3"
+
 jobs:
   validate:
     name: Build and Test
@@ -39,11 +42,10 @@ jobs:
       - name: Run go vet
         run: make vet
 
-      - name: Run linters
-        uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
-          args: --timeout=5m
+          version: ${{ env.GOLANGCILINT_VERSION }}
+          skip-cache: true
 
       - name: Build
         run: make build
