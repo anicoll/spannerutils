@@ -3770,6 +3770,12 @@ func (p *parser) parseSelectList() ([]Expr, []ID, *parseError) {
 		}
 
 		if p.eat(",") {
+			// Stop on a trailing comma immediately before a SELECT clause keyword
+			// so that FROM/WHERE/etc. are not consumed as column expressions.
+			if p.sniff("FROM") || p.sniff("WHERE") || p.sniff("GROUP") ||
+				p.sniff("HAVING") || p.sniff("ORDER") || p.sniff("LIMIT") {
+				break
+			}
 			continue
 		}
 		break
