@@ -194,6 +194,63 @@ func TestParseQuery(t *testing.T) {
 				},
 			},
 		},
+		// bare table alias (no AS keyword)
+		{
+			`SELECT s.Name FROM Staff s WHERE s.ID > 2`,
+			Query{
+				Select: Select{
+					List: []Expr{PathExp{"s", "Name"}},
+					From: []SelectFrom{SelectFromTable{Table: "Staff", Alias: "s"}},
+					Where: ComparisonOp{
+						Op:  Gt,
+						LHS: PathExp{"s", "ID"},
+						RHS: IntegerLiteral(2),
+					},
+				},
+			},
+		},
+		// bare alias identical to AS alias
+		{
+			`SELECT t.col FROM MyTable t`,
+			Query{
+				Select: Select{
+					List: []Expr{PathExp{"t", "col"}},
+					From: []SelectFrom{SelectFromTable{Table: "MyTable", Alias: "t"}},
+				},
+			},
+		},
+		// AS alias still works
+		{
+			`SELECT t.col FROM MyTable AS t`,
+			Query{
+				Select: Select{
+					List: []Expr{PathExp{"t", "col"}},
+					From: []SelectFrom{SelectFromTable{Table: "MyTable", Alias: "t"}},
+				},
+			},
+		},
+		// bare alias in subquery
+		{
+			`SELECT (SELECT COUNT(*) FROM Orders o WHERE o.UserID = u.ID) FROM Users u`,
+			Query{
+				Select: Select{
+					List: []Expr{
+						ScalarSubquery{Query: Query{
+							Select: Select{
+								List: []Expr{Func{Name: "COUNT", Args: []Expr{Star}}},
+								From: []SelectFrom{SelectFromTable{Table: "Orders", Alias: "o"}},
+								Where: ComparisonOp{
+									Op:  Eq,
+									LHS: PathExp{"o", "UserID"},
+									RHS: PathExp{"u", "ID"},
+								},
+							},
+						}},
+					},
+					From: []SelectFrom{SelectFromTable{Table: "Users", Alias: "u"}},
+				},
+			},
+		},
 		// with single table hint
 		{
 			`SELECT * FROM Packages@{FORCE_INDEX=PackagesIdx} WHERE package_idx=@packageIdx`,

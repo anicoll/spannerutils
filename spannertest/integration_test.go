@@ -1015,14 +1015,13 @@ func TestIntegration_ReadsAndQueries(t *testing.T) {
 			nil,
 			[][]interface{}{{false}},
 		},
-		// TODO: Correlated subquery with table alias - requires alias support
-		// {
-		// 	`SELECT Name FROM Staff WHERE EXISTS(SELECT 1 FROM Staff s2 WHERE s2.ID = Staff.ID AND s2.Cool = TRUE) ORDER BY Name`,
-		// 	nil,
-		// 	[][]interface{}{
-		// 		{"Jack"},
-		// 	},
-		// },
+		{
+			`SELECT Name FROM Staff WHERE EXISTS(SELECT 1 FROM Staff s2 WHERE s2.ID = Staff.ID AND s2.Cool = TRUE) ORDER BY Name`,
+			nil,
+			[][]interface{}{
+				{"Teal'c"},
+			},
+		},
 		{
 			`SELECT Name, Height FROM Staff WHERE Height BETWEEN @min AND @max ORDER BY Height DESC`,
 			map[string]interface{}{"min": 1.75, "max": 1.85},

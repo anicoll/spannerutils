@@ -16,13 +16,11 @@ import (
 	"sync"
 	"time"
 
+	"cloud.google.com/go/civil"
+	"github.com/anicoll/spannerutils/spansql"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-
 	structpb "google.golang.org/protobuf/types/known/structpb"
-
-	"cloud.google.com/go/civil"
-	"cloud.google.com/go/spanner/spansql"
 )
 
 type database struct {

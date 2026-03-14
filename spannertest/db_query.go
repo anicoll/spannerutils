@@ -6,7 +6,7 @@ import (
 	"io"
 	"sort"
 
-	"cloud.google.com/go/spanner/spansql"
+	"github.com/anicoll/spannerutils/spansql"
 )
 
 /*
@@ -501,7 +501,7 @@ func (d *database) queryContext(q spansql.Query, params queryParams) (*queryCont
 			if err := findTablesInExpr(e.RHS); err != nil {
 				return err
 			}
-		// For other expression types (literals, IDs, etc.), no subqueries to find
+			// For other expression types (literals, IDs, etc.), no subqueries to find
 		}
 		return nil
 	}
@@ -540,11 +540,16 @@ func (d *database) queryContext(q spansql.Query, params queryParams) (*queryCont
 }
 
 func (d *database) evalSelect(sel spansql.Select, qc *queryContext) (si *selIter, evalErr error) {
+	return d.evalSelectWithOuter(sel, qc, nil)
+}
+
+func (d *database) evalSelectWithOuter(sel spansql.Select, qc *queryContext, outer *evalContext) (si *selIter, evalErr error) {
 	var ri rowIter = &nullIter{}
 	ec := evalContext{
 		params: qc.params,
 		db:     d,
 		qc:     qc,
+		outer:  outer,
 	}
 
 	// Make a copy of sel.List to avoid mutating the original query's slice.
