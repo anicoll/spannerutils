@@ -6,8 +6,10 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -28,6 +30,10 @@ type evalContext struct {
 	aliases map[spansql.ID]spansql.Expr
 
 	params queryParams
+
+	// Database and query context for evaluating subqueries.
+	db *database
+	qc *queryContext
 }
 
 // coercedValue represents a literal value that has been coerced to a different type.
@@ -217,6 +223,12 @@ func (ec evalContext) evalBoolExpr(be spansql.BoolExpr) (*bool, error) {
 		}
 		if be.Neg {
 			b = !b
+		}
+		return &b, nil
+	case spansql.ExistsOp:
+		b, err := ec.evalExistsOp(be)
+		if err != nil {
+			return nil, err
 		}
 		return &b, nil
 	}
@@ -547,6 +559,12 @@ func (ec evalContext) evalExpr(e spansql.Expr) (interface{}, error) {
 			return 0, fmt.Errorf("internal error: did not find aggregate column %d", e.AggIndex)
 		}
 		return ec.row[ci], nil
+	case spansql.ScalarSubquery:
+		return ec.evalScalarSubquery(e)
+	case spansql.ArraySubquery:
+		return ec.evalArraySubquery(e)
+	case spansql.ExistsOp:
+		return ec.evalExistsOp(e)
 	}
 }
 
@@ -575,6 +593,136 @@ func (ec evalContext) evalPathExp(pe spansql.PathExp) (interface{}, error) {
 		return ec.row.copyDataElem(i), nil
 	}
 	return nil, fmt.Errorf("couldn't resolve path expression %s", pe.SQL())
+}
+
+// execSubquery executes a subquery reusing the parent's locked query context.
+func (ec evalContext) execSubquery(q spansql.Query) (rowIter, error) {
+	si, err := ec.db.evalSelect(q.Select, ec.qc)
+	if err != nil {
+		return nil, err
+	}
+
+	// Materialise all rows so ORDER BY / LIMIT can operate on the full set.
+	cols := si.Cols()
+	var rows []row
+	for {
+		r, err := si.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, r.copyAllData())
+	}
+
+	var ri rowIter = &rawIter{cols: cols, rows: rows}
+
+	if len(q.Order) > 0 {
+		var aux []spansql.Expr
+		var desc []bool
+		for _, o := range q.Order {
+			aux = append(aux, o.Expr)
+			desc = append(desc, o.Desc)
+		}
+		rowEC := evalContext{cols: cols, params: ec.params}
+		var keys [][]interface{}
+		for _, r := range rows {
+			rowEC.row = r
+			key, err := rowEC.evalExprList(aux)
+			if err != nil {
+				return nil, err
+			}
+			keys = append(keys, key)
+		}
+		sort.Sort(externalRowSorter{rows: rows, keys: keys, desc: desc})
+	}
+
+	if q.Limit != nil {
+		if q.Offset != nil {
+			off, err := evalLiteralOrParam(q.Offset, ec.params)
+			if err != nil {
+				return nil, err
+			}
+			ri = &offsetIter{ri: ri, skip: off}
+		}
+		lim, err := evalLiteralOrParam(q.Limit, ec.params)
+		if err != nil {
+			return nil, err
+		}
+		ri = &limitIter{ri: ri, rem: lim}
+	}
+
+	return toRawIter(ri)
+}
+
+func (ec evalContext) evalScalarSubquery(ss spansql.ScalarSubquery) (interface{}, error) {
+	if ec.db == nil || ec.qc == nil {
+		return nil, fmt.Errorf("subqueries not supported in this context")
+	}
+	ri, err := ec.execSubquery(ss.Query)
+	if err != nil {
+		return nil, err
+	}
+	if len(ri.Cols()) != 1 {
+		return nil, fmt.Errorf("scalar subquery must return exactly one column, got %d", len(ri.Cols()))
+	}
+	row, err := ri.Next()
+	if err == io.EOF {
+		return nil, nil // zero rows → NULL
+	}
+	if err != nil {
+		return nil, err
+	}
+	if _, err = ri.Next(); err == nil {
+		return nil, fmt.Errorf("scalar subquery returned more than one row")
+	}
+	if len(row) == 0 {
+		return nil, nil
+	}
+	return row[0], nil
+}
+
+func (ec evalContext) evalArraySubquery(as spansql.ArraySubquery) (interface{}, error) {
+	if ec.db == nil || ec.qc == nil {
+		return nil, fmt.Errorf("subqueries not supported in this context")
+	}
+	ri, err := ec.execSubquery(as.Query)
+	if err != nil {
+		return nil, err
+	}
+	if len(ri.Cols()) != 1 {
+		return nil, fmt.Errorf("array subquery must return exactly one column, got %d", len(ri.Cols()))
+	}
+	var result []interface{}
+	for {
+		row, err := ri.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		if len(row) > 0 {
+			result = append(result, row[0])
+		}
+	}
+	return result, nil
+}
+
+func (ec evalContext) evalExistsOp(eo spansql.ExistsOp) (bool, error) {
+	if ec.db == nil || ec.qc == nil {
+		return false, fmt.Errorf("subqueries not supported in this context")
+	}
+	ri, err := ec.execSubquery(eo.Subquery)
+	if err != nil {
+		return false, err
+	}
+	_, err = ri.Next()
+	if err == io.EOF {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 func (ec evalContext) evalID(id spansql.ID) (interface{}, error) {
@@ -810,7 +958,13 @@ func compareVals(x, y interface{}) int {
 		}
 		if f, ok := y.(float64); ok {
 			// Coersion from INT64 to FLOAT64 is allowed.
-			return compareVals(x, f)
+			xf := float64(x)
+			if xf < f {
+				return -1
+			} else if xf > f {
+				return 1
+			}
+			return 0
 		}
 		y := y.(int64)
 		if x < y {
@@ -889,7 +1043,7 @@ func (ec evalContext) colInfo(e spansql.Expr) (colInfo, error) {
 			return colInfo{}, err
 		}
 		return colInfo{Type: t}, nil
-	case spansql.LogicalOp, spansql.ComparisonOp, spansql.IsOp:
+	case spansql.LogicalOp, spansql.ComparisonOp, spansql.IsOp, spansql.ExistsOp:
 		return colInfo{Type: spansql.Type{Base: spansql.Bool}}, nil
 	case spansql.PathExp, spansql.ID:
 		// TODO: support more than only naming a table column.
@@ -907,6 +1061,31 @@ func (ec evalContext) colInfo(e spansql.Expr) (colInfo, error) {
 	case spansql.Paren:
 		return ec.colInfo(e.Expr)
 	case spansql.Func:
+		// Aggregate functions have distinct return-type rules.
+		if aggFunc, ok := aggregateFuncs[e.Name]; ok {
+			if len(e.Args) == 0 {
+				return colInfo{}, fmt.Errorf("aggregate function %s requires at least one argument", e.Name)
+			}
+			var argType spansql.Type
+			if e.Args[0] == spansql.Star {
+				if !aggFunc.AcceptStar {
+					return colInfo{}, fmt.Errorf("aggregate function %s does not accept * as an argument", e.Name)
+				}
+				argType = int64Type
+			} else {
+				ci, err := ec.colInfo(e.Args[0])
+				if err != nil {
+					return colInfo{}, err
+				}
+				argType = ci.Type
+			}
+			// Call Eval with no values just to obtain the return type.
+			_, retType, err := aggFunc.Eval(nil, argType)
+			if err != nil {
+				return colInfo{}, err
+			}
+			return colInfo{Type: retType}, nil
+		}
 		_, t, err := ec.evalFunc(e)
 		if err != nil {
 			return colInfo{}, err
@@ -933,8 +1112,38 @@ func (ec evalContext) colInfo(e spansql.Expr) (colInfo, error) {
 		return colInfo{Type: int64Type}, nil
 	case aggSentinel:
 		return colInfo{Type: e.Type, AggIndex: e.AggIndex}, nil
+	case spansql.ScalarSubquery:
+		ci, err := ec.subqueryElemColInfo(e.Query.Select)
+		return ci, err
+	case spansql.ArraySubquery:
+		ci, err := ec.subqueryElemColInfo(e.Query.Select)
+		if err != nil {
+			return colInfo{}, err
+		}
+		ci.Type.Array = true
+		return ci, nil
 	}
 	return colInfo{}, fmt.Errorf("can't deduce column type from expression [%s] (type %T)", e.SQL(), e)
+}
+
+// subqueryElemColInfo returns the colInfo for the first expression in a
+// subquery's SELECT list, resolving column types via the FROM clause.
+func (ec evalContext) subqueryElemColInfo(sel spansql.Select) (colInfo, error) {
+	if ec.db == nil || ec.qc == nil {
+		return colInfo{}, fmt.Errorf("subqueries not supported in this context")
+	}
+	if len(sel.List) == 0 {
+		return colInfo{}, fmt.Errorf("subquery has empty SELECT list")
+	}
+	subEC := evalContext{params: ec.params, db: ec.db, qc: ec.qc}
+	if len(sel.From) > 0 {
+		var err error
+		subEC, _, err = ec.db.evalSelectFrom(ec.qc, subEC, sel.From[0])
+		if err != nil {
+			return colInfo{}, err
+		}
+	}
+	return subEC.colInfo(sel.List[0])
 }
 
 func (ec evalContext) arithColType(ao spansql.ArithOp) (spansql.Type, error) {
