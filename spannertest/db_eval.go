@@ -1089,6 +1089,13 @@ func (ec evalContext) colInfo(e spansql.Expr) (colInfo, error) {
 	case spansql.Paren:
 		return ec.colInfo(e.Expr)
 	case spansql.Func:
+		// TIMESTAMP always returns a TIMESTAMP type regardless of its argument.
+		// We must not call evalFunc here because the row may be empty during
+		// the type-determination phase; a column-ref argument would evaluate
+		// to nil, causing the function to return an error.
+		if e.Name == "TIMESTAMP" {
+			return colInfo{Type: spansql.Type{Base: spansql.Timestamp}}, nil
+		}
 		// GREATEST and LEAST return the same type as their arguments.
 		// We must not call evalFunc here because the row may be empty during
 		// the type-determination phase; instead derive the type from the args.
