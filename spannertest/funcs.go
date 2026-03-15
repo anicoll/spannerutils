@@ -136,15 +136,36 @@ var functions = map[string]function{
 	},
 	"TIMESTAMP": {
 		Eval: func(values []interface{}, types []spansql.Type) (interface{}, spansql.Type, error) {
-			t, okArg1 := values[0].(string)
-			if !(okArg1) {
+			if len(values) == 0 {
 				return nil, spansql.Type{}, status.Error(codes.InvalidArgument, "No matching signature for function TIMESTAMP for the given argument types")
 			}
-			timestamp, err := time.Parse(time.RFC3339, t)
-			if err != nil {
+			if values[0] == nil {
+				return nil, spansql.Type{Base: spansql.Timestamp}, nil
+			}
+			switch v := values[0].(type) {
+			case string:
+				// Spanner accepts multiple timestamp string formats.
+				for _, format := range []string{
+					time.RFC3339Nano,
+					time.RFC3339,
+					"2006-01-02 15:04:05.999999999Z07:00",
+					"2006-01-02 15:04:05Z07:00",
+					"2006-01-02 15:04:05.999999999-07",
+					"2006-01-02 15:04:05-07",
+				} {
+					if t, err := time.Parse(format, v); err == nil {
+						return t.UTC(), spansql.Type{Base: spansql.Timestamp}, nil
+					}
+				}
+				return nil, spansql.Type{}, status.Error(codes.InvalidArgument, "No matching signature for function TIMESTAMP for the given argument types")
+			case civil.Date:
+				t := time.Date(v.Year, v.Month, v.Day, 0, 0, 0, 0, time.UTC)
+				return t, spansql.Type{Base: spansql.Timestamp}, nil
+			case time.Time:
+				return v, spansql.Type{Base: spansql.Timestamp}, nil
+			default:
 				return nil, spansql.Type{}, status.Error(codes.InvalidArgument, "No matching signature for function TIMESTAMP for the given argument types")
 			}
-			return timestamp, spansql.Type{Base: spansql.Timestamp}, nil
 		},
 	},
 	"FARM_FINGERPRINT": {

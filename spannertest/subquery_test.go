@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"cloud.google.com/go/civil"
 	"cloud.google.com/go/spanner"
 )
 
@@ -345,6 +346,87 @@ func TestCoalesce(t *testing.T) {
 					i, j, got[i][j], got[i][j], want[i][j], want[i][j])
 			}
 		}
+	}
+}
+
+// TestTimestamp covers the TIMESTAMP scalar function with multiple input
+// formats and argument types supported by Cloud Spanner.
+func TestTimestamp(t *testing.T) {
+	client, adminClient, _, cleanup := makeClient(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := updateDDL(t, adminClient,
+		`CREATE TABLE Events (
+			ID        INT64 NOT NULL,
+			EventDate DATE,
+			EventTime TIMESTAMP,
+		) PRIMARY KEY (ID)`); err != nil {
+		t.Fatal(err)
+	}
+
+	eventDate := civil.Date{Year: 2024, Month: time.June, Day: 1}
+	eventTime := time.Date(2024, 6, 1, 10, 30, 0, 0, time.UTC)
+
+	_, err := client.Apply(ctx, []*spanner.Mutation{
+		spanner.Insert("Events", []string{"ID", "EventDate", "EventTime"}, []interface{}{1, eventDate, eventTime}),
+	})
+	if err != nil {
+		t.Fatalf("inserting data: %v", err)
+	}
+
+	tests := []struct {
+		name  string
+		query string
+		want  time.Time
+	}{
+		{
+			name:  "RFC3339 with T separator and Z",
+			query: `SELECT TIMESTAMP("2024-06-01T10:30:00Z")`,
+			want:  eventTime,
+		},
+		{
+			name:  "space separator with +00 timezone",
+			query: `SELECT TIMESTAMP("2024-06-01 10:30:00+00")`,
+			want:  eventTime,
+		},
+		{
+			name:  "space separator with +00:00 timezone",
+			query: `SELECT TIMESTAMP("2024-06-01 10:30:00+00:00")`,
+			want:  eventTime,
+		},
+		{
+			name:  "zero timestamp with space separator",
+			query: `SELECT TIMESTAMP("0001-01-01 00:00:00+00")`,
+			want:  time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name:  "TIMESTAMP column passthrough",
+			query: `SELECT TIMESTAMP(EventTime) FROM Events`,
+			want:  eventTime,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ri := client.Single().Query(ctx, spanner.NewStatement(tt.query))
+			got, err := slurpRows(t, ri)
+			if err != nil {
+				t.Fatalf("query failed: %v", err)
+			}
+			if len(got) != 1 || len(got[0]) != 1 {
+				t.Fatalf("expected 1 row with 1 col, got %v", got)
+			}
+			gotTime, ok := got[0][0].(time.Time)
+			if !ok {
+				t.Fatalf("expected time.Time, got %T: %v", got[0][0], got[0][0])
+			}
+			if !gotTime.Equal(tt.want) {
+				t.Errorf("got %v, want %v", gotTime, tt.want)
+			}
+		})
 	}
 }
 
